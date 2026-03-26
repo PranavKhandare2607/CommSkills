@@ -1,22 +1,32 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Communication Skills Improvement System API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: openai
+    description: OpenAI AI chat and audio operations
+  - name: grammar
+    description: Grammar checking operations
+  - name: vocabulary
+    description: Vocabulary lookup operations
+  - name: analyzer
+    description: Communication analysis operations
+  - name: progress
+    description: User progress tracking
+  - name: speaking
+    description: Speaking practice sessions
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +34,254 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /openai/conversations:
+    get:
+      operationId: listOpenaiConversations
+      tags: [openai]
+      summary: List all conversations
+      responses:
+        "200":
+          description: List of conversations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OpenaiConversation"
+    post:
+      operationId: createOpenaiConversation
+      tags: [openai]
+      summary: Create a new conversation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOpenaiConversationBody"
+      responses:
+        "201":
+          description: Created conversation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenaiConversation"
+
+  /openai/conversations/{id}:
+    get:
+      operationId: getOpenaiConversation
+      tags: [openai]
+      summary: Get conversation with messages
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Conversation with messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenaiConversationWithMessages"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenaiError"
+    delete:
+      operationId: deleteOpenaiConversation
+      tags: [openai]
+      summary: Delete a conversation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenaiError"
+
+  /openai/conversations/{id}/messages:
+    get:
+      operationId: listOpenaiMessages
+      tags: [openai]
+      summary: List messages in a conversation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OpenaiMessage"
+    post:
+      operationId: sendOpenaiMessage
+      tags: [openai]
+      summary: Send a text message and receive a streaming text response
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendOpenaiMessageBody"
+      responses:
+        "200":
+          description: SSE stream of assistant text chunks
+          content:
+            text/event-stream: {}
+
+  /openai/conversations/{id}/voice-messages:
+    post:
+      operationId: sendOpenaiVoiceMessage
+      tags: [openai]
+      summary: Send audio and receive a streaming voice response
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendOpenaiVoiceMessageBody"
+      responses:
+        "200":
+          description: SSE stream of transcript and audio chunks
+          content:
+            text/event-stream: {}
+
+  /grammar/check:
+    post:
+      operationId: checkGrammar
+      tags: [grammar]
+      summary: Check grammar and get corrections
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GrammarCheckBody"
+      responses:
+        "200":
+          description: Grammar check result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GrammarCheckResult"
+
+  /vocabulary/lookup:
+    post:
+      operationId: lookupVocabulary
+      tags: [vocabulary]
+      summary: Look up a word definition
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VocabularyLookupBody"
+      responses:
+        "200":
+          description: Word definition result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VocabularyLookupResult"
+
+  /analyze:
+    post:
+      operationId: analyzeCommunication
+      tags: [analyzer]
+      summary: Analyze a message for communication quality
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnalyzeBody"
+      responses:
+        "200":
+          description: Analysis result with scores
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyzeResult"
+
+  /progress:
+    get:
+      operationId: getProgress
+      tags: [progress]
+      summary: Get user progress and statistics
+      responses:
+        "200":
+          description: User progress data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProgress"
+    post:
+      operationId: updateProgress
+      tags: [progress]
+      summary: Update user progress (add points, log activity)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProgressBody"
+      responses:
+        "200":
+          description: Updated progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProgress"
+
+  /speaking/session:
+    post:
+      operationId: saveSpeakingSession
+      tags: [speaking]
+      summary: Save a speaking practice session result
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SpeakingSessionBody"
+      responses:
+        "200":
+          description: Session saved with feedback
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpeakingSessionResult"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +292,322 @@ components:
       required:
         - status
 
+    OpenaiConversation:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - title
+        - createdAt
+
+    OpenaiMessage:
+      type: object
+      properties:
+        id:
+          type: integer
+        conversationId:
+          type: integer
+        role:
+          type: string
+        content:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - conversationId
+        - role
+        - content
+        - createdAt
+
+    CreateOpenaiConversationBody:
+      type: object
+      properties:
+        title:
+          type: string
+      required:
+        - title
+
+    SendOpenaiMessageBody:
+      type: object
+      properties:
+        content:
+          type: string
+      required:
+        - content
+
+    SendOpenaiVoiceMessageBody:
+      type: object
+      properties:
+        audio:
+          type: string
+          description: Base64-encoded audio data
+      required:
+        - audio
+
+    OpenaiConversationWithMessages:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/OpenaiMessage"
+      required:
+        - id
+        - title
+        - createdAt
+        - messages
+
+    OpenaiError:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+
+    GrammarCheckBody:
+      type: object
+      properties:
+        text:
+          type: string
+      required:
+        - text
+
+    GrammarCheckResult:
+      type: object
+      properties:
+        original:
+          type: string
+        corrected:
+          type: string
+        score:
+          type: number
+        improvements:
+          type: array
+          items:
+            type: string
+        explanation:
+          type: string
+      required:
+        - original
+        - corrected
+        - score
+        - improvements
+        - explanation
+
+    VocabularyLookupBody:
+      type: object
+      properties:
+        word:
+          type: string
+      required:
+        - word
+
+    VocabularyLookupResult:
+      type: object
+      properties:
+        found:
+          type: boolean
+        word:
+          type: string
+        pronunciation:
+          type: string
+        definitions:
+          type: array
+          items:
+            type: object
+            properties:
+              partOfSpeech:
+                type: string
+              definition:
+                type: string
+              example:
+                type: string
+            required:
+              - partOfSpeech
+              - definition
+        synonyms:
+          type: array
+          items:
+            type: string
+        antonyms:
+          type: array
+          items:
+            type: string
+      required:
+        - found
+        - word
+        - definitions
+        - synonyms
+        - antonyms
+
+    AnalyzeBody:
+      type: object
+      properties:
+        text:
+          type: string
+      required:
+        - text
+
+    AnalyzeResult:
+      type: object
+      properties:
+        overallScore:
+          type: number
+        clarityScore:
+          type: number
+        conciseness:
+          type: number
+        concreteness:
+          type: number
+        correctness:
+          type: number
+        courtesy:
+          type: number
+        grammarScore:
+          type: number
+        feedback:
+          type: string
+        improvements:
+          type: array
+          items:
+            type: string
+      required:
+        - overallScore
+        - clarityScore
+        - conciseness
+        - concreteness
+        - correctness
+        - courtesy
+        - grammarScore
+        - feedback
+        - improvements
+
+    UserProgress:
+      type: object
+      properties:
+        points:
+          type: integer
+        badge:
+          type: string
+        grammarAccuracy:
+          type: number
+        vocabularyLearned:
+          type: integer
+        speakingAttempts:
+          type: integer
+        recentActivity:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActivityItem"
+        grammarHistory:
+          type: array
+          items:
+            $ref: "#/components/schemas/HistoryPoint"
+        vocabularyHistory:
+          type: array
+          items:
+            $ref: "#/components/schemas/HistoryPoint"
+      required:
+        - points
+        - badge
+        - grammarAccuracy
+        - vocabularyLearned
+        - speakingAttempts
+        - recentActivity
+        - grammarHistory
+        - vocabularyHistory
+
+    ActivityItem:
+      type: object
+      properties:
+        type:
+          type: string
+        description:
+          type: string
+        pointsEarned:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - type
+        - description
+        - pointsEarned
+        - createdAt
+
+    HistoryPoint:
+      type: object
+      properties:
+        name:
+          type: string
+        score:
+          type: number
+      required:
+        - name
+        - score
+
+    UpdateProgressBody:
+      type: object
+      properties:
+        type:
+          type: string
+        pointsEarned:
+          type: integer
+        description:
+          type: string
+        accuracy:
+          type: number
+      required:
+        - type
+        - pointsEarned
+        - description
+
+    SpeakingSessionBody:
+      type: object
+      properties:
+        transcript:
+          type: string
+        wordCount:
+          type: integer
+        duration:
+          type: integer
+      required:
+        - transcript
+        - wordCount
+
+    SpeakingSessionResult:
+      type: object
+      properties:
+        feedback:
+          type: string
+        wordCount:
+          type: integer
+        pointsEarned:
+          type: integer
+        clarityScore:
+          type: number
+        pacingScore:
+          type: number
+      required:
+        - feedback
+        - wordCount
+        - pointsEarned
+        - clarityScore
+        - pacingScore

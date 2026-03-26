@@ -1,17 +1,13 @@
 packages:
-  "framer-motion": "For page transitions, list animations, and smooth chat bubble appearances"
-  "clsx": "For conditional class name joining"
-  "tailwind-merge": "For merging tailwind classes safely"
-  "lucide-react": "For beautiful consistent iconography"
+  "framer-motion": "For smooth page transitions and card reveal animations"
+  "recharts": "For the dashboard analytics charts"
+  "react-markdown": "To render the AI coach's markdown responses beautifully"
 
 images:
-  - path: "artifacts/communication-skills/public/images/hero-bg.png"
-    description: "Abstract modern gradient background in deep professional indigo and slate tones, soft light leaks, corporate and clean"
-    aspect_ratio: "16:9"
   - path: "artifacts/communication-skills/public/images/ai-avatar.png"
-    description: "A friendly, modern, minimalist 3D illustrated robot face icon in white and indigo colors on a transparent background, high quality, flat design"
+    description: "A friendly, modern, minimalist 3D robot or AI assistant avatar on a solid vibrant indigo background, professional and approachable"
     aspect_ratio: "1:1"
 
 notes:
-  - This is a pure frontend application; all chatbot logic is executed locally using predefined rules and keyword matching.
-  - Using Web Speech API for voice recognition (browser compatibility required, gracefully degrades).
+  - The AI Coach uses Server-Sent Events (SSE) which requires a custom fetch implementation bypassing the generated react-query hooks.
+  - Using built-in Web Speech API for voice transcription and text-to-speech.

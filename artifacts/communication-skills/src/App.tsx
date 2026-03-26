@@ -1,31 +1,41 @@
-import { Switch, Route, Router as WouterRouter } from "wouter";
+import { Switch, Route, Router as WouterRouter, Redirect } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 import { AppLayout } from "@/components/layout/AppLayout";
-import Home from "@/pages/Home";
+import Dashboard from "@/pages/Dashboard";
 import AIAssistant from "@/pages/AIAssistant";
+import Analyzer from "@/pages/Analyzer";
+import Grammar from "@/pages/Grammar";
 import SevenCs from "@/pages/SevenCs";
-import GrammarTips from "@/pages/GrammarTips";
+import Talk from "@/pages/Talk";
 import Vocabulary from "@/pages/Vocabulary";
-import InterviewTips from "@/pages/InterviewTips";
-import EmailWriting from "@/pages/EmailWriting";
+import Resources from "@/pages/Resources";
 import NotFound from "@/pages/not-found";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: false,
+      staleTime: 5 * 60 * 1000,
+    },
+  },
+});
 
 function Router() {
   return (
     <AppLayout>
       <Switch>
-        <Route path="/" component={Home} />
-        <Route path="/ai-assistant" component={AIAssistant} />
-        <Route path="/seven-cs" component={SevenCs} />
-        <Route path="/grammar" component={GrammarTips} />
-        <Route path="/vocabulary" component={Vocabulary} />
-        <Route path="/interview" component={InterviewTips} />
-        <Route path="/email" component={EmailWriting} />
+        <Route path="/" component={() => <Redirect to="/dashboard" />} />
+        <Route path="/dashboard" component={Dashboard} />
+        <Route path="/ai-coach" component={AIAssistant} />
+        <Route path="/analyzer" component={Analyzer} />
+        <Route path="/grammar" component={Grammar} />
+        <Route path="/sevens" component={SevenCs} />
+        <Route path="/talk" component={Talk} />
+        <Route path="/word" component={Vocabulary} />
+        <Route path="/resources" component={Resources} />
         <Route component={NotFound} />
       </Switch>
     </AppLayout>

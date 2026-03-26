@@ -91,6 +91,37 @@ Generated Zod schemas from the OpenAPI spec (e.g. `HealthCheckResponse`). Used b
 
 Generated React Query hooks and fetch client from the OpenAPI spec (e.g. `useHealthCheck`, `healthCheck`).
 
+### `artifacts/communication-skills` (`@workspace/communication-skills`)
+
+React + Vite frontend — the "CommSkills" Communication Skills Improvement System. 8 pages:
+- `/dashboard` — stats cards + recharts (AreaChart grammar accuracy, BarChart vocabulary growth) + recent activity feed
+- `/ai-coach` — "Buddy AI" chatbot with SSE streaming from OpenAI, voice input (Web Speech API STT), TTS via window.speechSynthesis, quick prompts
+- `/analyzer` — Communication Analyzer using 7 C's scoring
+- `/grammar` — Grammar Tool with side-by-side original/corrected view and score
+- `/sevens` — 7 C's of Communication cards with Quick Quiz modals
+- `/talk` — Speaking Practice with live transcript (Web Speech API) + AI feedback
+- `/word` — Word Practice / Vocabulary lookup with definitions, pronunciation, synonyms
+- `/resources` — Static resource cards
+
+Gamification: points system (tracked in DB), badges (Beginner/Explorer/Practitioner/Expert), shown in sidebar bottom + dashboard.
+
+### `artifacts/api-server` routes
+
+All routes are under `/api`:
+- `GET/POST /openai/conversations` — list/create conversation sessions
+- `GET/DELETE /openai/conversations/:id` — get (with messages) / delete conversation
+- `GET /openai/conversations/:id/messages` — list messages
+- `POST /openai/conversations/:id/messages` — send message + SSE streaming response from OpenAI gpt-5.2
+- `POST /grammar/check` — AI grammar check (score, corrected text, improvements)
+- `POST /vocabulary/lookup` — AI vocabulary lookup (definition, pronunciation, synonyms, antonyms)
+- `POST /analyze` — Communication analyzer (7 C's scores + feedback)
+- `GET /progress` — Get user progress + recent activity + chart data
+- `POST /progress` — Update progress (log activity, add points)
+- `POST /speaking/session` — Analyze speaking transcript with AI
+
+OpenAI integration uses Replit AI Integrations (env: `AI_INTEGRATIONS_OPENAI_BASE_URL`, `AI_INTEGRATIONS_OPENAI_API_KEY`).
+Client: `lib/integrations-openai-ai-server/src/client.ts`
+
 ### `scripts` (`@workspace/scripts`)
 
 Utility scripts package. Each script is a `.ts` file in `src/` with a corresponding npm script in `package.json`. Run scripts via `pnpm --filter @workspace/scripts run <script>`. Scripts can import any workspace package (e.g., `@workspace/db`) by adding it as a dependency in `scripts/package.json`.

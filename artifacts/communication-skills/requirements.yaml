@@ -1,0 +1,17 @@
+packages:
+  "framer-motion": "For page transitions, list animations, and smooth chat bubble appearances"
+  "clsx": "For conditional class name joining"
+  "tailwind-merge": "For merging tailwind classes safely"
+  "lucide-react": "For beautiful consistent iconography"
+
+images:
+  - path: "artifacts/communication-skills/public/images/hero-bg.png"
+    description: "Abstract modern gradient background in deep professional indigo and slate tones, soft light leaks, corporate and clean"
+    aspect_ratio: "16:9"
+  - path: "artifacts/communication-skills/public/images/ai-avatar.png"
+    description: "A friendly, modern, minimalist 3D illustrated robot face icon in white and indigo colors on a transparent background, high quality, flat design"
+    aspect_ratio: "1:1"
+
+notes:
+  - This is a pure frontend application; all chatbot logic is executed locally using predefined rules and keyword matching.
+  - Using Web Speech API for voice recognition (browser compatibility required, gracefully degrades).

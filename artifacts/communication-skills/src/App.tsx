@@ -11,6 +11,7 @@ import Grammar from "@/pages/Grammar";
 import SevenCs from "@/pages/SevenCs";
 import Talk from "@/pages/Talk";
 import Vocabulary from "@/pages/Vocabulary";
+import Companion from "@/pages/Companion";
 import Resources from "@/pages/Resources";
 import NotFound from "@/pages/not-found";
 
@@ -35,6 +36,7 @@ function Router() {
         <Route path="/sevens" component={SevenCs} />
         <Route path="/talk" component={Talk} />
         <Route path="/word" component={Vocabulary} />
+        <Route path="/companion" component={Companion} />
         <Route path="/resources" component={Resources} />
         <Route component={NotFound} />
       </Switch>

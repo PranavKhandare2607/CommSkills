@@ -6,6 +6,7 @@ import vocabularyRouter from "./vocabulary";
 import analyzeRouter from "./analyze";
 import progressRouter from "./progress";
 import speakingRouter from "./speaking";
+import companionRouter from "./companion";
 
 const router: IRouter = Router();
 
@@ -16,5 +17,6 @@ router.use(vocabularyRouter);
 router.use(analyzeRouter);
 router.use(progressRouter);
 router.use(speakingRouter);
+router.use(companionRouter);
 
 export default router;

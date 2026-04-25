@@ -1,0 +1,165 @@
+Add an advanced feature called "AI Female Companion" above the Resources section.
+
+GOAL:
+Create an interactive animated female AI character who can either:
+1. Take a professional interview
+2. Talk like a friendly companion
+
+--------------------------------------------------
+
+MAIN MODES (IMPORTANT)
+
+Add two options:
+
+1. Interview Mode
+2. Friend Mode
+
+--------------------------------------------------
+
+UI DESIGN
+
+- Show animated female avatar (cartoon style)
+- Avatar should have:
+  - Lip-sync talking animation
+  - Expressions (smile, neutral, serious)
+
+- Camera preview (user webcam)
+- Chat + voice interaction panel
+- Mic button 🎤
+- Mode selector (Interview / Friend)
+
+--------------------------------------------------
+
+AVATAR APPEARANCE
+
+- Interview Mode:
+  - Female avatar wearing professional blazer
+  - Formal tone
+
+- Friend Mode:
+  - Female avatar wearing kurti
+  - Friendly, relaxed tone
+
+--------------------------------------------------
+
+VOICE SYSTEM
+
+- Use Speech Recognition:
+  User speaks → convert to text
+
+- Use Speech Synthesis:
+  AI replies in female voice (English accent)
+
+- Avatar should speak with voice + animation
+
+--------------------------------------------------
+
+CAMERA SYSTEM
+
+- Use getUserMedia to open front camera
+- Show live preview
+
+BASIC ANALYSIS (SIMULATED INTELLIGENCE):
+
+- If face not visible:
+  → "Please sit in front of camera"
+
+- If user moves too much:
+  → "Sit steady and confident"
+
+- If user looks away:
+  → "Maintain eye contact"
+
+- Detect speaking activity (active/passive)
+
+--------------------------------------------------
+
+INTERVIEW MODE (STRICT)
+
+- AI asks questions one by one:
+  - Tell me about yourself
+  - Strengths and weaknesses
+  - Why should we hire you
+  - Describe a challenge
+
+- AI should:
+  - Wait for user answer
+  - Analyze response
+  - Give feedback:
+    ✔ Confidence
+    ✔ Clarity
+    ✔ Grammar
+
+- Maintain professional tone
+
+--------------------------------------------------
+
+FRIEND MODE (FREE TALK)
+
+- AI behaves like a friendly female companion
+- Can talk about:
+  - Studies
+  - Life
+  - Motivation
+  - Stories
+  - General conversation
+
+- Should:
+  ✔ Ask follow-up questions
+  ✔ Motivate user
+  ✔ Help in communication
+  ✔ Support basic emotional conversation (safe & positive)
+
+--------------------------------------------------
+
+SMART RESPONSE BEHAVIOR
+
+- Correct user's sentences
+- Improve communication
+- Give suggestions
+- Maintain natural conversation
+
+--------------------------------------------------
+
+ANIMATION
+
+- Avatar should:
+  - Move lips while speaking
+  - Slight head movement
+  - Expression change based on mode
+
+--------------------------------------------------
+
+SESSION FEEDBACK
+
+After interaction:
+
+Show summary:
+
+- Communication Score
+- Confidence Level
+- Suggestions:
+  "Improve eye contact"
+  "Speak more clearly"
+
+--------------------------------------------------
+
+DATA
+
+Include:
+- Interview questions
+- Friendly conversation replies
+- Motivational messages
+- Communication tips
+
+--------------------------------------------------
+
+FINAL REQUIREMENT
+
+Make the system feel like:
+A real animated female AI companion who can:
+- Take interviews professionally
+- Talk like a friend
+- Interact using voice and camera
+
+Keep it lightweight and fully working in browser without paid APIs.

@@ -9,6 +9,7 @@ import {
   Mic,
   Sparkles,
   Library,
+  Heart,
   Menu, 
   X,
   Trophy,
@@ -26,6 +27,7 @@ const navItems = [
   { href: "/sevens", label: "7 C's of Comm", icon: BookOpen },
   { href: "/talk", label: "Speaking Practice", icon: Mic },
   { href: "/word", label: "Word Practice", icon: Sparkles },
+  { href: "/companion", label: "AI Companion", icon: Heart, isPrimary: true },
   { href: "/resources", label: "Resources", icon: Library },
 ];
 

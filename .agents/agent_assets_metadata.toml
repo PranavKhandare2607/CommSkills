@@ -1,0 +1,26 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "1cZjJ7SNpLNrq2xCMwtTD"
+uri = "file://artifacts/communication-skills/src/assets/aisha-closed.png"
+type = "image"
+title = "aisha mouth closed"
+
+[[generated]]
+id = "VXSo6nhwkh-b9aGVLZPV4"
+uri = "file://artifacts/communication-skills/src/assets/aisha-open.png"
+type = "image"
+title = "aisha mouth open"
+
+[[generated]]
+id = "T1T0jdt39DBMygArY6rmN"
+uri = "file://artifacts/communication-skills/src/assets/priya-closed.png"
+type = "image"
+title = "priya mouth closed"
+
+[[generated]]
+id = "ESPTlBLEtX7_Pczqjpy_v"
+uri = "file://artifacts/communication-skills/src/assets/priya-open.png"
+type = "image"
+title = "priya mouth open"

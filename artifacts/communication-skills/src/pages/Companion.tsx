@@ -10,6 +10,8 @@ import { FemaleAvatar } from "@/components/companion/FemaleAvatar";
 import { useUpdateProgress } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getGetProgressQueryKey } from "@workspace/api-client-react";
+import aishaThumb from "@/assets/aisha-closed.png";
+import priyaThumb from "@/assets/priya-closed.png";
 
 type Mode = "interview" | "friend";
 
@@ -33,16 +35,22 @@ const MODE_INFO = {
   interview: {
     title: "Aisha — Interview Coach",
     subtitle: "Senior HR · Professional Mock Interview",
+    btnLabel: "Mock Interview",
+    btnDesc: "Practice with HR coach",
     color: "indigo",
     icon: Briefcase,
     welcomeMsg: "Hello! I'm Aisha, your interview coach. We'll do a mock interview today. Take a deep breath, sit confidently, and let's begin. Tell me about yourself.",
+    startBtn: "Start Interview",
   },
   friend: {
     title: "Priya — Your Friendly Companion",
     subtitle: "Best Friend · Casual Chat & Motivation",
+    btnLabel: "Talk with Friend",
+    btnDesc: "Chat casually with bestie",
     color: "rose",
     icon: Heart,
-    welcomeMsg: "Heyy! 😊 I'm Priya — so glad you're here! Tell me, how was your day? What's on your mind?",
+    welcomeMsg: "Hey there! So happy to chat with you today. Tell me — how are you feeling right now? What's on your mind?",
+    startBtn: "Start Chatting",
   },
 };
 
@@ -77,6 +85,18 @@ export default function Companion() {
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const sessionStartTime = useRef<number>(0);
   const lastSpokenIdRef = useRef<string>("");
+  const voiceModeRef = useRef<boolean>(false);
+  const isMutedRef = useRef<boolean>(false);
+  const isStreamingRef = useRef<boolean>(false);
+  const isListeningRef = useRef<boolean>(false);
+  const sendMessageRef = useRef<((t: string) => void) | null>(null);
+  const startListeningRef = useRef<(() => void) | null>(null);
+
+  // Sync refs with state for use inside callbacks/event handlers
+  useEffect(() => { voiceModeRef.current = voiceMode; }, [voiceMode]);
+  useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
+  useEffect(() => { isStreamingRef.current = isStreaming; }, [isStreaming]);
+  useEffect(() => { isListeningRef.current = isListening; }, [isListening]);
 
   const queryClient = useQueryClient();
   const { mutate: updateProgress } = useUpdateProgress();
@@ -120,33 +140,58 @@ export default function Companion() {
   }, [messages, isStreaming, isMuted]);
 
   // ============================================================
-  // SPEECH SYNTHESIS — Indian English Female
+  // SPEECH SYNTHESIS — Standard English Female (US/UK)
   // ============================================================
   const speakText = useCallback((text: string) => {
     window.speechSynthesis.cancel();
     const clean = text.replace(/[*_#`>]/g, "").replace(/\([^)]*\)/g, "").replace(/\n{2,}/g, ". ").trim();
     if (!clean) return;
     const utterance = new SpeechSynthesisUtterance(clean);
-    utterance.lang = "en-IN";
-    utterance.rate = mode === "interview" ? 0.92 : 1.0;
-    utterance.pitch = 1.15;
+    utterance.lang = "en-US";
+    utterance.rate = mode === "interview" ? 0.95 : 1.05;
+    utterance.pitch = mode === "interview" ? 1.1 : 1.2;
     utterance.volume = 1;
 
     const voices = window.speechSynthesis.getVoices();
-    const isFemale = (n: string) => /female|woman|girl|heera|raveena|kalpana|priya|veena|aditi|leela|samantha|zira|susan|karen|tessa|fiona|moira|catherine|allison|ava|serena|victoria/i.test(n);
+    // Strong preference for clear standard English female voices
+    const isFemale = (n: string) =>
+      /female|woman|girl|samantha|zira|susan|karen|tessa|fiona|moira|catherine|allison|ava|serena|victoria|jenny|aria|nancy|amber|emma|sara|amy|joanna|salli|kimberly|kendra|ivy|google us english|microsoft.*female|hazel|libby/i.test(n);
     const preferred =
-      voices.find(v => v.lang === "en-IN" && isFemale(v.name)) ||
-      voices.find(v => v.lang === "en-IN" && v.name.toLowerCase().includes("google")) ||
-      voices.find(v => v.lang === "en-IN") ||
+      // 1) US English female (best match)
+      voices.find(v => v.lang === "en-US" && isFemale(v.name)) ||
+      voices.find(v => v.lang === "en-US" && v.name.toLowerCase().includes("google")) ||
+      // 2) UK English female
+      voices.find(v => v.lang === "en-GB" && isFemale(v.name)) ||
+      voices.find(v => v.lang === "en-GB" && v.name.toLowerCase().includes("google")) ||
+      // 3) Any en-US
+      voices.find(v => v.lang === "en-US") ||
+      // 4) Any English female
       voices.find(v => v.lang.startsWith("en") && isFemale(v.name)) ||
+      // 5) Any English voice
       voices.find(v => v.lang.startsWith("en"));
     if (preferred) utterance.voice = preferred;
 
     utterance.onstart = () => setIsSpeaking(true);
-    utterance.onend = () => setIsSpeaking(false);
+    utterance.onend = () => {
+      setIsSpeaking(false);
+      // Trigger auto-listen via ref-based handler (avoids stale closure)
+      autoListenAfterSpeakRef.current?.();
+    };
     utterance.onerror = () => setIsSpeaking(false);
     window.speechSynthesis.speak(utterance);
   }, [mode]);
+
+  // Ref to call the latest auto-listen handler from speakText.onend
+  const autoListenAfterSpeakRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    autoListenAfterSpeakRef.current = () => {
+      if (voiceModeRef.current && !isMutedRef.current && !isListeningRef.current && !isStreamingRef.current) {
+        setTimeout(() => {
+          startListeningRef.current?.();
+        }, 350);
+      }
+    };
+  }, []);
 
   // ============================================================
   // CAMERA
@@ -154,17 +199,23 @@ export default function Companion() {
   const startCamera = useCallback(async () => {
     try {
       setCameraError(null);
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setCameraError("Your browser doesn't support camera access.");
+        return;
+      }
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: 640, height: 480 },
+        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
         audio: false,
       });
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        // Force play in some browsers
+        videoRef.current.play().catch(() => {});
       }
       setCameraOn(true);
 
-      // Simulate posture/eye-contact tips at random intervals
+      // Posture/eye-contact tips at intervals
       setTimeout(() => {
         const tips = ["Maintain eye contact with the camera", "Sit steady and confident", "Smile naturally — you're doing great"];
         let tipIdx = 0;
@@ -177,10 +228,15 @@ export default function Companion() {
       }, 10000);
     } catch (err: any) {
       console.error("Camera error:", err);
-      if (err.name === "NotAllowedError") {
-        setCameraError("Camera blocked. Please allow camera access in your browser.");
+      const isInIframe = (() => { try { return window.self !== window.top; } catch { return true; } })();
+      if (err.name === "NotAllowedError" || err.name === "SecurityError") {
+        setCameraError(isInIframe
+          ? "Camera blocked inside preview. Click 'Open in new tab' at the top to use the camera."
+          : "Camera blocked. Click the camera icon in your browser's address bar and allow access.");
       } else if (err.name === "NotFoundError") {
-        setCameraError("No camera found.");
+        setCameraError("No camera found on this device.");
+      } else if (err.name === "NotReadableError") {
+        setCameraError("Camera is being used by another app. Close it and retry.");
       } else {
         setCameraError(`Camera error: ${err.message || err.name}`);
       }
@@ -220,7 +276,7 @@ export default function Companion() {
 
     const recognition = new SR();
     recognitionRef.current = recognition;
-    recognition.lang = "en-IN";
+    recognition.lang = "en-US";
     recognition.interimResults = true;
     recognition.continuous = false;
     recognition.maxAlternatives = 1;
@@ -249,8 +305,9 @@ export default function Companion() {
     };
     recognition.onend = () => {
       setIsListening(false);
-      if (voiceMode && finalT.trim()) {
-        setTimeout(() => sendMessage(finalT.trim()), 300);
+      const txt = finalT.trim();
+      if (voiceModeRef.current && txt) {
+        setTimeout(() => sendMessageRef.current?.(txt), 300);
       }
     };
     try { recognition.start(); } catch { setIsListening(false); }
@@ -332,6 +389,10 @@ export default function Companion() {
     if (input.trim()) sendMessage(input.trim());
   };
 
+  // Sync function refs for use inside event handlers
+  useEffect(() => { sendMessageRef.current = sendMessage; }, [sendMessage]);
+  useEffect(() => { startListeningRef.current = startListening; }, [startListening]);
+
   // ============================================================
   // SESSION MANAGEMENT
   // ============================================================
@@ -341,7 +402,11 @@ export default function Companion() {
     sessionStartTime.current = Date.now();
     setShowFeedback(false);
     setFeedback(null);
-  }, [modeInfo.welcomeMsg]);
+    // Auto-start camera (best effort) so user sees themselves immediately
+    if (!cameraOn) {
+      startCamera().catch(() => {});
+    }
+  }, [modeInfo.welcomeMsg, cameraOn, startCamera]);
 
   const switchMode = useCallback((newMode: Mode) => {
     if (newMode === mode) return;
@@ -451,36 +516,57 @@ export default function Companion() {
           </div>
         </motion.div>
 
-        {/* Mode Selector */}
-        <div className="grid grid-cols-2 gap-3 mb-6">
+        {/* Mode Selector — choose your companion */}
+        <div className="mb-2 flex items-center gap-2">
+          <span className="text-sm font-bold text-slate-700">Choose your companion:</span>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
           {(Object.keys(MODE_INFO) as Mode[]).map(m => {
             const info = MODE_INFO[m];
             const isActive = mode === m;
+            const thumb = m === "interview" ? aishaThumb : priyaThumb;
             return (
               <button
                 key={m}
                 onClick={() => switchMode(m)}
                 className={cn(
-                  "relative p-4 rounded-2xl border-2 transition-all text-left flex items-center gap-3",
+                  "relative p-4 rounded-2xl border-2 transition-all text-left flex items-center gap-4 group",
                   isActive
                     ? m === "interview"
-                      ? "border-indigo-500 bg-indigo-50 shadow-lg shadow-indigo-500/10"
-                      : "border-rose-500 bg-rose-50 shadow-lg shadow-rose-500/10"
-                    : "border-slate-200 bg-white hover:border-slate-300"
+                      ? "border-indigo-500 bg-indigo-50 shadow-xl shadow-indigo-500/20 scale-[1.02]"
+                      : "border-rose-500 bg-rose-50 shadow-xl shadow-rose-500/20 scale-[1.02]"
+                    : "border-slate-200 bg-white hover:border-slate-300 hover:shadow-md"
                 )}
               >
+                {/* Avatar thumbnail */}
                 <div className={cn(
-                  "w-12 h-12 rounded-xl flex items-center justify-center shrink-0",
-                  m === "interview" ? "bg-indigo-100 text-indigo-600" : "bg-rose-100 text-rose-600"
+                  "w-16 h-16 rounded-full overflow-hidden border-2 shrink-0 shadow-md",
+                  isActive
+                    ? m === "interview" ? "border-indigo-300" : "border-rose-300"
+                    : "border-slate-200"
                 )}>
-                  <info.icon className="w-6 h-6" />
+                  <img src={thumb} alt={m} className="w-full h-full object-cover" />
                 </div>
-                <div className="min-w-0">
-                  <div className="font-bold text-slate-900">{m === "interview" ? "Interview Mode" : "Friend Mode"}</div>
-                  <div className="text-xs text-slate-500 truncate">{m === "interview" ? "Mock interview with HR coach" : "Casual chat with bestie Priya"}</div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <info.icon className={cn(
+                      "w-4 h-4",
+                      m === "interview" ? "text-indigo-600" : "text-rose-600"
+                    )} />
+                    <span className="font-display font-bold text-slate-900 text-base">{info.btnLabel}</span>
+                  </div>
+                  <div className="text-xs text-slate-600 mb-1">
+                    {m === "interview" ? "with Aisha (HR Coach)" : "with Priya (Bestie)"}
+                  </div>
+                  <div className="text-[11px] text-slate-500 truncate">{info.btnDesc}</div>
                 </div>
                 {isActive && (
-                  <CheckCircle2 className={cn("absolute top-3 right-3 w-5 h-5", m === "interview" ? "text-indigo-600" : "text-rose-600")} />
+                  <div className={cn(
+                    "absolute -top-2 -right-2 w-6 h-6 rounded-full flex items-center justify-center shadow-lg",
+                    m === "interview" ? "bg-indigo-600" : "bg-rose-500"
+                  )}>
+                    <CheckCircle2 className="w-4 h-4 text-white" />
+                  </div>
                 )}
               </button>
             );
@@ -506,7 +592,6 @@ export default function Companion() {
                   isSpeaking={isSpeaking}
                   isListening={isListening}
                   mode={mode}
-                  expression={isStreaming ? "neutral" : isSpeaking ? "smile" : "neutral"}
                 />
               </div>
               <div className="flex justify-center mt-3">
@@ -571,9 +656,38 @@ export default function Companion() {
                     </div>
                   </>
                 ) : (
-                  <div className="w-full h-full flex flex-col items-center justify-center text-slate-500">
-                    <CameraOff className="w-12 h-12 mb-2" />
-                    <p className="text-xs">{cameraError || "Camera off"}</p>
+                  <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 p-4 text-center">
+                    <CameraOff className="w-10 h-10 mb-3 text-slate-500" />
+                    {cameraError ? (
+                      <>
+                        <p className="text-xs text-amber-300 mb-3 leading-relaxed">{cameraError}</p>
+                        {inIframe ? (
+                          <button
+                            onClick={openInNewTab}
+                            className="text-xs font-bold px-3 py-1.5 rounded-lg bg-amber-500 text-white hover:bg-amber-600"
+                          >
+                            Open in new tab ↗
+                          </button>
+                        ) : (
+                          <button
+                            onClick={startCamera}
+                            className="text-xs font-bold px-3 py-1.5 rounded-lg bg-emerald-500 text-white hover:bg-emerald-600"
+                          >
+                            Try again
+                          </button>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-xs mb-3">Turn on camera to see yourself</p>
+                        <button
+                          onClick={startCamera}
+                          className="text-xs font-bold px-3 py-1.5 rounded-lg bg-emerald-500/90 text-white hover:bg-emerald-500"
+                        >
+                          <Camera className="w-3 h-3 inline mr-1" /> Turn on camera
+                        </button>
+                      </>
+                    )}
                   </div>
                 )}
               </div>

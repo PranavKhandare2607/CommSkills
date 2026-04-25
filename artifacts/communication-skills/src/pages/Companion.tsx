@@ -483,20 +483,40 @@ export default function Companion() {
   // ============================================================
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50/30 pb-12">
-      {/* Iframe banner */}
+      {/* Iframe banner — BIG and obvious so user knows mic/camera need a new tab */}
       {showIframeBanner && (
-        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2.5 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 text-sm text-amber-900 min-w-0">
-            <Mic className="w-4 h-4 shrink-0 text-amber-600" />
-            <span className="truncate"><strong>Voice & camera need a new tab.</strong> They're blocked inside this preview pane.</span>
+        <motion.div
+          initial={{ y: -20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          className="bg-gradient-to-r from-amber-500 via-orange-500 to-amber-500 px-4 py-4 shadow-lg"
+        >
+          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="flex items-center gap-3 text-white min-w-0">
+              <div className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center shrink-0 animate-pulse">
+                <Mic className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <div className="font-bold text-base sm:text-lg leading-tight">Mic & Camera blocked here!</div>
+                <div className="text-xs sm:text-sm text-white/90 leading-tight">Browsers don't allow camera/mic inside preview frames. Click the button to open in a real tab →</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={openInNewTab}
+                className="font-bold px-5 py-2.5 rounded-xl bg-white text-orange-700 hover:bg-amber-50 shadow-lg hover:scale-105 transition-all text-sm whitespace-nowrap"
+              >
+                Open in new tab ↗
+              </button>
+              <button
+                onClick={() => setBannerDismissed(true)}
+                className="text-white/80 hover:text-white px-2 text-lg"
+                aria-label="Dismiss"
+              >
+                ✕
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button onClick={openInNewTab} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-600 text-white hover:bg-amber-700">
-              Open in new tab ↗
-            </button>
-            <button onClick={() => setBannerDismissed(true)} className="text-xs text-amber-700 px-2">✕</button>
-          </div>
-        </div>
+        </motion.div>
       )}
 
       <div className="max-w-7xl mx-auto px-4 md:px-8 py-6 md:py-10">
@@ -592,6 +612,7 @@ export default function Companion() {
                   isSpeaking={isSpeaking}
                   isListening={isListening}
                   mode={mode}
+                  expression={isStreaming ? "neutral" : isListening ? "smile" : mode === "friend" ? "smile" : "neutral"}
                 />
               </div>
               <div className="flex justify-center mt-3">

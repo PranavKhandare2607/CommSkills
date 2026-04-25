@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Mic, Square, Activity, Target, Zap } from "lucide-react";
-import { useSaveSpeakingSession } from "@workspace/api-client-react";
+import { useSaveSpeakingSession, useUpdateProgress } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getGetProgressQueryKey } from "@workspace/api-client-react";
 
@@ -9,10 +9,12 @@ export default function Talk() {
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [hasScored, setHasScored] = useState(false);
+  const [startTime, setStartTime] = useState<number>(0);
   const recognitionRef = useRef<any>(null);
   
   const queryClient = useQueryClient();
   const { mutate: saveSession, data: result, isPending } = useSaveSpeakingSession();
+  const { mutate: updateProgress } = useUpdateProgress();
 
   useEffect(() => {
     return () => {
@@ -45,6 +47,7 @@ export default function Talk() {
       setIsRecording(true);
       setTranscript("");
       setHasScored(false);
+      setStartTime(Date.now());
     };
     
     recognition.onresult = (event: any) => {
@@ -64,13 +67,27 @@ export default function Talk() {
   const handleAnalyze = () => {
     if (!transcript) return;
     const words = transcript.trim().split(/\s+/).length;
+    const duration = startTime > 0 ? Math.max(1, Math.round((Date.now() - startTime) / 1000)) : 30;
     
     saveSession({
-      data: { transcript, wordCount: words, duration: 60 } // Mock duration
+      data: { transcript, wordCount: words, duration }
     }, {
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: getGetProgressQueryKey() });
-        setHasScored(true);
+      onSuccess: (res) => {
+        if (!hasScored) {
+          updateProgress({
+            data: {
+              type: "speaking",
+              description: `Completed a speaking session (${words} words)`,
+              pointsEarned: res.pointsEarned ?? 10,
+              accuracy: res.clarityScore
+            }
+          }, {
+            onSuccess: () => {
+              queryClient.invalidateQueries({ queryKey: getGetProgressQueryKey() });
+              setHasScored(true);
+            }
+          });
+        }
       }
     });
   };

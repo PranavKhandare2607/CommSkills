@@ -194,10 +194,27 @@ export default function AIAssistant() {
     if (textareaRef.current) textareaRef.current.style.height = "auto";
   }, [input, isGenerating, sendMessage]);
 
-  const startListening = useCallback(() => {
+  const startListening = useCallback(async () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      alert("Voice recognition is not supported in this browser. Try Chrome or Edge.");
+      alert("Voice recognition isn't supported in this browser. Please use Chrome, Edge, or Safari.");
+      return;
+    }
+
+    // Explicitly request microphone permission first — this triggers the browser permission prompt
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Immediately release the mic — SpeechRecognition will reopen it
+      stream.getTracks().forEach(t => t.stop());
+    } catch (err: any) {
+      console.error("Mic permission error:", err);
+      if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+        alert("Microphone access was blocked. Please click the 🔒 lock icon in your browser's address bar and allow microphone access, then try again.\n\nIf you're viewing this in Replit's preview pane, click the 'Open in new tab' button above the preview to enable mic access.");
+      } else if (err.name === "NotFoundError") {
+        alert("No microphone was found. Please connect a microphone and try again.");
+      } else {
+        alert(`Could not access microphone: ${err.message || err.name}\n\nTry opening this app in a new tab.`);
+      }
       return;
     }
 
@@ -235,6 +252,13 @@ export default function AIAssistant() {
     recognition.onerror = (event: any) => {
       console.warn("Speech recognition error:", event.error);
       setIsListening(false);
+      if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+        alert("Microphone permission denied. Please allow microphone access in your browser settings and try again.");
+      } else if (event.error === "no-speech") {
+        // silent — user just didn't say anything
+      } else if (event.error === "network") {
+        alert("Speech recognition needs an internet connection. Please check your connection and try again.");
+      }
     };
 
     recognition.onend = () => {
@@ -245,7 +269,12 @@ export default function AIAssistant() {
       }
     };
 
-    recognition.start();
+    try {
+      recognition.start();
+    } catch (err) {
+      console.error("Failed to start recognition:", err);
+      setIsListening(false);
+    }
   }, [voiceMode, handleSend]);
 
   const stopListening = useCallback(() => {

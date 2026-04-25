@@ -55,7 +55,7 @@ export default function Talk() {
 
     const recognition = new SpeechRecognition();
     recognitionRef.current = recognition;
-    recognition.lang = 'en-US';
+    recognition.lang = 'en-IN';
     recognition.continuous = true;
     recognition.interimResults = true;
 

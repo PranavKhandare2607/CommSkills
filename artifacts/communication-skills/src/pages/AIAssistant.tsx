@@ -147,6 +147,14 @@ export default function AIAssistant() {
     }
   }, [input]);
 
+  // Preload voices — getVoices() returns empty initially in many browsers until voiceschanged fires
+  useEffect(() => {
+    const loadVoices = () => window.speechSynthesis.getVoices();
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+    return () => { window.speechSynthesis.onvoiceschanged = null; };
+  }, []);
+
   // TTS for Buddy's responses
   useEffect(() => {
     if (isMuted || isGenerating) return;
@@ -167,15 +175,29 @@ export default function AIAssistant() {
     window.speechSynthesis.cancel();
     const clean = text.replace(/[*_#`>]/g, "").replace(/\n{2,}/g, ". ").trim();
     const utterance = new SpeechSynthesisUtterance(clean);
+    utterance.lang = "en-IN";
     utterance.rate = 0.95;
-    utterance.pitch = 1.05;
+    utterance.pitch = 1.1;
     utterance.volume = 1;
 
-    // Try to pick a good voice
+    // Pick the best Indian English female voice available
     const voices = window.speechSynthesis.getVoices();
-    const preferred = voices.find(v => v.name.includes("Google") && v.lang.startsWith("en")) ||
-      voices.find(v => v.lang.startsWith("en-US")) ||
+    const isFemale = (name: string) => /female|woman|girl|heera|raveena|kalpana|priya|veena|aditi|leela|shelley|samantha|zira|susan|karen|tessa|fiona|moira|catherine|allison|ava|serena|victoria|rishi/i.test(name);
+
+    const preferred =
+      // 1. Indian English female voices (Google or system)
+      voices.find(v => v.lang === "en-IN" && isFemale(v.name)) ||
+      voices.find(v => v.lang.startsWith("en-IN") && isFemale(v.name)) ||
+      // 2. Any Indian English voice (Google's "Heera" or "Raveena" are female by default)
+      voices.find(v => v.lang === "en-IN" && v.name.toLowerCase().includes("google")) ||
+      voices.find(v => v.lang === "en-IN") ||
+      voices.find(v => v.lang.startsWith("en-IN")) ||
+      // 3. Fallback: any English female voice
+      voices.find(v => v.lang.startsWith("en") && isFemale(v.name)) ||
+      voices.find(v => v.lang.startsWith("en") && v.name.toLowerCase().includes("google")) ||
+      voices.find(v => v.lang.startsWith("en")) ||
       voices[0];
+
     if (preferred) utterance.voice = preferred;
 
     utterance.onstart = () => setIsSpeaking(true);
@@ -222,7 +244,7 @@ export default function AIAssistant() {
 
     const recognition = new SpeechRecognition();
     recognitionRef.current = recognition;
-    recognition.lang = "en-US";
+    recognition.lang = "en-IN";
     recognition.interimResults = true;
     recognition.continuous = false;
     recognition.maxAlternatives = 1;

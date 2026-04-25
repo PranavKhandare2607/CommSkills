@@ -276,10 +276,18 @@ export default function AIAssistant() {
       setIsListening(false);
       if (event.error === "not-allowed" || event.error === "service-not-allowed") {
         alert("Microphone permission denied. Please allow microphone access in your browser settings and try again.");
-      } else if (event.error === "no-speech") {
-        // silent — user just didn't say anything
+      } else if (event.error === "no-speech" || event.error === "aborted") {
+        // silent — user didn't speak or stopped manually
       } else if (event.error === "network") {
-        alert("Speech recognition needs an internet connection. Please check your connection and try again.");
+        // The Web Speech API in Chrome/Edge sends audio to Google's servers in the background.
+        // This is blocked when the page is loaded inside Replit's preview iframe.
+        // The fix is to open the app in a new tab (full URL) where the speech service can be reached.
+        const inIframe = window.self !== window.top;
+        if (inIframe) {
+          alert("Voice input is blocked inside the preview pane.\n\n✅ FIX: Click the 'Open in new tab' button (↗ icon) at the top of the preview pane to open this app in its own tab. The mic will work there.\n\n(This is a browser security restriction — Web Speech API requires a top-level page, not an embedded iframe.)");
+        } else {
+          alert("Voice input couldn't reach the speech recognition service. Please try again, or use a different browser like Chrome or Edge.");
+        }
       }
     };
 
@@ -323,8 +331,44 @@ export default function AIAssistant() {
   const promptsToShow = showAllPrompts ? activeCat.prompts : activeCat.prompts.slice(0, 4);
   const showSuggestions = messages.length <= 2;
 
+  // Detect if running inside an iframe (e.g., Replit preview pane) — speech recognition is blocked there
+  const [inIframe, setInIframe] = useState(false);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+  useEffect(() => {
+    try { setInIframe(window.self !== window.top); } catch { setInIframe(true); }
+  }, []);
+  const showIframeBanner = inIframe && !bannerDismissed;
+  const openInNewTab = () => window.open(window.location.href, "_blank", "noopener,noreferrer");
+
   return (
     <div className="flex flex-col h-[calc(100vh-64px)] md:h-screen bg-slate-50">
+      {/* Iframe warning banner — voice features need a top-level page */}
+      {showIframeBanner && (
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2.5 flex items-center justify-between gap-3 shrink-0">
+          <div className="flex items-center gap-2 text-sm text-amber-900 min-w-0">
+            <Mic className="w-4 h-4 shrink-0 text-amber-600" />
+            <span className="truncate">
+              <strong>Voice features need a new tab.</strong> The mic is blocked inside this preview pane.
+            </span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={openInNewTab}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-600 text-white hover:bg-amber-700 transition-colors"
+            >
+              Open in new tab ↗
+            </button>
+            <button
+              onClick={() => setBannerDismissed(true)}
+              className="text-xs text-amber-700 hover:text-amber-900 px-2 py-1"
+              title="Dismiss"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="bg-white px-4 md:px-6 py-3 border-b border-slate-200 flex items-center justify-between shrink-0 shadow-sm">
         <div className="flex items-center gap-3">

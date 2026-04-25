@@ -79,8 +79,15 @@ export default function Talk() {
       setIsRecording(false);
       if (event.error === "not-allowed" || event.error === "service-not-allowed") {
         alert("Microphone permission denied. Please allow microphone access in your browser settings.");
+      } else if (event.error === "no-speech" || event.error === "aborted") {
+        // silent
       } else if (event.error === "network") {
-        alert("Speech recognition needs an internet connection.");
+        const inIframe = window.self !== window.top;
+        if (inIframe) {
+          alert("Voice input is blocked inside the preview pane.\n\n✅ FIX: Click the 'Open in new tab' button (↗ icon) at the top of the preview pane to open this app in its own tab. The mic will work there.\n\n(This is a browser security restriction — Web Speech API requires a top-level page, not an embedded iframe.)");
+        } else {
+          alert("Voice input couldn't reach the speech recognition service. Please try again, or use a different browser like Chrome or Edge.");
+        }
       }
     };
     recognition.onend = () => setIsRecording(false);

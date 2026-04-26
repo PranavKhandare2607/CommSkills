@@ -196,6 +196,17 @@ export default function Companion() {
   // ============================================================
   // CAMERA
   // ============================================================
+  const attachStream = useCallback((stream: MediaStream) => {
+    const v = videoRef.current;
+    if (!v) return false;
+    if (v.srcObject !== stream) v.srcObject = stream;
+    v.muted = true;
+    v.playsInline = true;
+    const p = v.play();
+    if (p && typeof p.catch === "function") p.catch(() => {});
+    return true;
+  }, []);
+
   const startCamera = useCallback(async () => {
     try {
       setCameraError(null);
@@ -208,12 +219,18 @@ export default function Companion() {
         audio: false,
       });
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        // Force play in some browsers
-        videoRef.current.play().catch(() => {});
-      }
       setCameraOn(true);
+      // Try attaching immediately; if video element isn't mounted yet,
+      // retry on the next frames until it is.
+      if (!attachStream(stream)) {
+        let attempts = 0;
+        const tryAttach = () => {
+          if (attachStream(stream)) return;
+          attempts++;
+          if (attempts < 30) requestAnimationFrame(tryAttach);
+        };
+        requestAnimationFrame(tryAttach);
+      }
 
       // Posture/eye-contact tips at intervals
       setTimeout(() => {
@@ -653,9 +670,20 @@ export default function Companion() {
                 </button>
               </div>
               <div className="aspect-video w-full bg-slate-800 rounded-xl overflow-hidden relative">
+                {/* Video is ALWAYS mounted so the ref is ready before getUserMedia returns.
+                    We just hide it when the camera is off. */}
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className={cn(
+                    "absolute inset-0 w-full h-full object-cover scale-x-[-1] bg-black",
+                    cameraOn ? "opacity-100" : "opacity-0 pointer-events-none"
+                  )}
+                />
                 {cameraOn ? (
                   <>
-                    <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover scale-x-[-1]" />
                     {/* Camera tip overlay */}
                     <AnimatePresence>
                       {activeTip && (
@@ -663,7 +691,7 @@ export default function Companion() {
                           initial={{ opacity: 0, y: -10 }}
                           animate={{ opacity: 1, y: 0 }}
                           exit={{ opacity: 0 }}
-                          className="absolute top-2 left-2 right-2 bg-amber-500/90 text-white text-xs px-3 py-2 rounded-lg flex items-center gap-2 shadow-lg backdrop-blur-sm"
+                          className="absolute top-2 left-2 right-2 bg-amber-500/90 text-white text-xs px-3 py-2 rounded-lg flex items-center gap-2 shadow-lg backdrop-blur-sm z-10"
                         >
                           <AlertCircle className="w-4 h-4 shrink-0" />
                           <span>{activeTip}</span>
@@ -671,13 +699,13 @@ export default function Companion() {
                       )}
                     </AnimatePresence>
                     {/* Recording indicator */}
-                    <div className="absolute top-2 right-2 flex items-center gap-1.5 bg-black/50 text-white text-xs px-2 py-1 rounded-md backdrop-blur-sm">
+                    <div className="absolute top-2 right-2 flex items-center gap-1.5 bg-black/50 text-white text-xs px-2 py-1 rounded-md backdrop-blur-sm z-10">
                       <span className="w-2 h-2 bg-rose-500 rounded-full animate-pulse" />
                       LIVE
                     </div>
                   </>
                 ) : (
-                  <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 p-4 text-center">
+                  <div className="absolute inset-0 w-full h-full flex flex-col items-center justify-center text-slate-400 p-4 text-center">
                     <CameraOff className="w-10 h-10 mb-3 text-slate-500" />
                     {cameraError ? (
                       <>

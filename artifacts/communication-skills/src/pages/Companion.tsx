@@ -94,6 +94,10 @@ export default function Companion() {
   const [language, setLanguage] = useState<"english" | "hindi" | "hinglish">("english");
   const languageRef = useRef<"english" | "hindi" | "hinglish">("english");
   useEffect(() => { languageRef.current = language; }, [language]);
+  // Track which voices are actually available so we can warn the user when Hindi is missing
+  const [hasHindiVoice, setHasHindiVoice] = useState(false);
+  const [hasIndianEnglishVoice, setHasIndianEnglishVoice] = useState(false);
+  const [activeVoiceName, setActiveVoiceName] = useState<string>("");
 
   const recognitionRef = useRef<any>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -123,9 +127,18 @@ export default function Companion() {
     try { setInIframe(window.self !== window.top); } catch { setInIframe(true); }
   }, []);
 
-  // Preload speech voices
+  // Preload speech voices and detect Hindi/Indian English availability
   useEffect(() => {
-    const loadVoices = () => window.speechSynthesis.getVoices();
+    const loadVoices = () => {
+      const voices = window.speechSynthesis.getVoices();
+      setHasHindiVoice(voices.some(v => v.lang === "hi-IN" || v.lang.startsWith("hi")));
+      setHasIndianEnglishVoice(voices.some(v => v.lang === "en-IN"));
+      // Helpful debug: list all available voices once loaded
+      if (voices.length > 0) {
+        // eslint-disable-next-line no-console
+        console.log("[CommSkills] Available voices:", voices.map(v => `${v.name} (${v.lang})`));
+      }
+    };
     loadVoices();
     window.speechSynthesis.onvoiceschanged = loadVoices;
     return () => { window.speechSynthesis.onvoiceschanged = null; };
@@ -162,52 +175,81 @@ export default function Companion() {
     window.speechSynthesis.cancel();
     const clean = text.replace(/[*_#`>]/g, "").replace(/\([^)]*\)/g, "").replace(/\n{2,}/g, ". ").trim();
     if (!clean) return;
-    const utterance = new SpeechSynthesisUtterance(clean);
 
-    // ===== Auto-detect Devanagari script (Hindi) per-utterance =====
+    // ===== Detect Devanagari script (Hindi) per-utterance =====
     const hasDevanagari = /[\u0900-\u097F]/.test(clean);
     const lang = languageRef.current;
-    const useHindiVoice = lang === "hindi" || (lang === "hinglish" && hasDevanagari);
-
-    utterance.lang = useHindiVoice ? "hi-IN" : "en-US";
-    utterance.rate = mode === "interview" ? (useHindiVoice ? 0.9 : 0.95) : (useHindiVoice ? 1.0 : 1.05);
-    utterance.pitch = mode === "interview" ? 1.1 : 1.2;
-    utterance.volume = 1;
+    const wantHindiVoice = lang === "hindi" || (lang === "hinglish" && hasDevanagari);
 
     const voices = window.speechSynthesis.getVoices();
     const isFemale = (n: string) =>
-      /female|woman|girl|samantha|zira|susan|karen|tessa|fiona|moira|catherine|allison|ava|serena|victoria|jenny|aria|nancy|amber|emma|sara|amy|joanna|salli|kimberly|kendra|ivy|google us english|microsoft.*female|hazel|libby|swara|kalpana|heera|priya/i.test(n);
+      /female|woman|girl|samantha|zira|susan|karen|tessa|fiona|moira|catherine|allison|ava|serena|victoria|jenny|aria|nancy|amber|emma|sara|amy|joanna|salli|kimberly|kendra|ivy|hazel|libby|swara|kalpana|heera|veena|priya|raveena|isha|aditi|lekha|google.*hindi|google.*india|microsoft.*heera|microsoft.*kalpana/i.test(n);
 
     let preferred: SpeechSynthesisVoice | undefined;
-    if (useHindiVoice) {
-      // Prefer Hindi female voice
+    let actualLang = "en-IN"; // default to Indian English accent
+
+    if (wantHindiVoice) {
+      // 1) Prefer real Hindi female voice
       preferred =
         voices.find(v => v.lang === "hi-IN" && isFemale(v.name)) ||
-        voices.find(v => v.lang === "hi-IN" && v.name.toLowerCase().includes("google")) ||
+        voices.find(v => v.lang === "hi-IN" && /google/i.test(v.name)) ||
         voices.find(v => v.lang === "hi-IN") ||
         voices.find(v => v.lang.startsWith("hi") && isFemale(v.name)) ||
-        voices.find(v => v.lang.startsWith("hi")) ||
-        // Fallback to en-IN (Indian English) if no Hindi voice
-        voices.find(v => v.lang === "en-IN" && isFemale(v.name)) ||
-        voices.find(v => v.lang === "en-IN");
+        voices.find(v => v.lang.startsWith("hi"));
+      if (preferred) {
+        actualLang = "hi-IN";
+      } else {
+        // 2) No Hindi voice on this device — use Indian English voice but tag as hi-IN
+        // so the OS may still pronounce Devanagari correctly if it has any Hindi support.
+        preferred =
+          voices.find(v => v.lang === "en-IN" && isFemale(v.name)) ||
+          voices.find(v => v.lang === "en-IN") ||
+          voices.find(v => v.lang.startsWith("en") && isFemale(v.name)) ||
+          voices.find(v => v.lang.startsWith("en"));
+        actualLang = "hi-IN";
+      }
     } else {
+      // English or Hinglish (Roman script) — use INDIAN ENGLISH (en-IN) for Indian accent
       preferred =
-        voices.find(v => v.lang === "en-US" && isFemale(v.name)) ||
-        voices.find(v => v.lang === "en-US" && v.name.toLowerCase().includes("google")) ||
+        voices.find(v => v.lang === "en-IN" && isFemale(v.name)) ||
+        voices.find(v => v.lang === "en-IN" && /google|microsoft/i.test(v.name)) ||
+        voices.find(v => v.lang === "en-IN") ||
+        // Hindi voice can also speak English in Indian accent — use as fallback
+        voices.find(v => v.lang === "hi-IN" && isFemale(v.name)) ||
+        voices.find(v => v.lang === "hi-IN") ||
+        // British English female (closer to Indian than US)
         voices.find(v => v.lang === "en-GB" && isFemale(v.name)) ||
-        voices.find(v => v.lang === "en-GB" && v.name.toLowerCase().includes("google")) ||
-        voices.find(v => v.lang === "en-US") ||
+        voices.find(v => v.lang === "en-GB") ||
+        // Last resort: any English female
         voices.find(v => v.lang.startsWith("en") && isFemale(v.name)) ||
         voices.find(v => v.lang.startsWith("en"));
+      actualLang = "en-IN";
     }
-    if (preferred) utterance.voice = preferred;
+
+    const utterance = new SpeechSynthesisUtterance(clean);
+    utterance.lang = actualLang;
+    utterance.rate = mode === "interview" ? (wantHindiVoice ? 0.88 : 0.92) : (wantHindiVoice ? 0.95 : 1.0);
+    utterance.pitch = mode === "interview" ? 1.1 : 1.2;
+    utterance.volume = 1;
+    if (preferred) {
+      utterance.voice = preferred;
+      setActiveVoiceName(`${preferred.name} (${preferred.lang})`);
+    } else {
+      setActiveVoiceName(`default ${actualLang}`);
+    }
+
+    // eslint-disable-next-line no-console
+    console.log("[CommSkills] Speaking:", { lang: actualLang, voice: preferred?.name || "default", text: clean.slice(0, 60) });
 
     utterance.onstart = () => setIsSpeaking(true);
     utterance.onend = () => {
       setIsSpeaking(false);
       autoListenAfterSpeakRef.current?.();
     };
-    utterance.onerror = () => setIsSpeaking(false);
+    utterance.onerror = (e: any) => {
+      console.warn("[CommSkills] TTS error:", e?.error || e);
+      setIsSpeaking(false);
+    };
     window.speechSynthesis.speak(utterance);
   }, [mode]);
 
@@ -324,10 +366,10 @@ export default function Companion() {
     const recognition = new SR();
     recognitionRef.current = recognition;
     // Use the user's selected language for speech recognition.
-    // Hindi → hi-IN. Hinglish → hi-IN (handles Hindi + recognises English words too in Chrome).
-    // English → en-US.
+    // Hindi → hi-IN. Hinglish → en-IN (better for Roman-script speakers who mix Hindi+English).
+    // English → en-IN (Indian English accent — much better than en-US for Indian users).
     const lang = languageRef.current;
-    recognition.lang = lang === "hindi" ? "hi-IN" : lang === "hinglish" ? "hi-IN" : "en-US";
+    recognition.lang = lang === "hindi" ? "hi-IN" : lang === "hinglish" ? "en-IN" : "en-IN";
     recognition.interimResults = true;
     recognition.continuous = false;
     recognition.maxAlternatives = 1;
@@ -954,10 +996,18 @@ export default function Companion() {
                     <Send className="w-5 h-5" />
                   </button>
                 </div>
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-slate-500">
-                    {voiceMode && <>🎙️ Voice mode ON · auto-sends · </>}
-                    {language === "hindi" ? "हिंदी" : language === "hinglish" ? "Hinglish" : "English"} · Female voice
+                <div className="flex items-center justify-between text-xs gap-2 flex-wrap">
+                  <span className="text-slate-500 truncate">
+                    {voiceMode && <>🎙️ Voice mode ON · </>}
+                    {language === "hindi" ? "हिंदी" : language === "hinglish" ? "Hinglish" : "English"}
+                    {" · "}
+                    Indian female voice
+                    {activeVoiceName && <span className="text-slate-400"> · {activeVoiceName}</span>}
+                    {language === "hindi" && !hasHindiVoice && (
+                      <span className="ml-1 text-amber-600 font-medium">
+                        · ⚠ No Hindi voice on this device — using English fallback
+                      </span>
+                    )}
                   </span>
                   <button
                     onClick={endSession}

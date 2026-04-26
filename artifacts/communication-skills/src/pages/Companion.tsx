@@ -31,6 +31,21 @@ interface FeedbackResult {
   improvements: string[];
 }
 
+type LangKey = "english" | "hindi" | "hinglish";
+
+const WELCOME_MSGS: Record<"interview" | "friend", Record<LangKey, string>> = {
+  interview: {
+    english: "Hello! I'm Aisha, your interview coach. We'll do a mock interview today. Take a deep breath, sit confidently, and let's begin. Tell me about yourself.",
+    hindi: "नमस्ते! मैं आइशा हूं, आपकी इंटरव्यू कोच। आज हम एक मॉक इंटरव्यू करेंगे। एक गहरी सांस लीजिए, आत्मविश्वास से बैठिए, और शुरू करते हैं। अपने बारे में बताइए।",
+    hinglish: "Hello! Main Aisha hoon, aapki interview coach. Aaj hum ek mock interview karenge. Ek deep breath lijiye, confidently baithiye, aur shuru karte hain. Tell me about yourself.",
+  },
+  friend: {
+    english: "Hey there! So happy to chat with you today. Tell me — how are you feeling right now? What's on your mind?",
+    hindi: "अरे हाय! आज तुमसे बात करके बहुत खुशी हो रही है। बताओ — अभी कैसा महसूस कर रहे हो? क्या चल रहा है दिमाग में?",
+    hinglish: "Arey hi! Aaj tumse baat karke bahut khushi ho rahi hai. Batao — abhi kaisa feel kar rahe ho? Kya chal raha hai mann mein?",
+  },
+};
+
 const MODE_INFO = {
   interview: {
     title: "Aisha — Interview Coach",
@@ -39,7 +54,6 @@ const MODE_INFO = {
     btnDesc: "Practice with HR coach",
     color: "indigo",
     icon: Briefcase,
-    welcomeMsg: "Hello! I'm Aisha, your interview coach. We'll do a mock interview today. Take a deep breath, sit confidently, and let's begin. Tell me about yourself.",
     startBtn: "Start Interview",
   },
   friend: {
@@ -49,7 +63,6 @@ const MODE_INFO = {
     btnDesc: "Chat casually with bestie",
     color: "rose",
     icon: Heart,
-    welcomeMsg: "Hey there! So happy to chat with you today. Tell me — how are you feeling right now? What's on your mind?",
     startBtn: "Start Chatting",
   },
 };
@@ -78,6 +91,9 @@ export default function Companion() {
   const [voiceMode, setVoiceMode] = useState(false);
   const [inIframe, setInIframe] = useState(false);
   const [bannerDismissed, setBannerDismissed] = useState(false);
+  const [language, setLanguage] = useState<"english" | "hindi" | "hinglish">("english");
+  const languageRef = useRef<"english" | "hindi" | "hinglish">("english");
+  useEffect(() => { languageRef.current = language; }, [language]);
 
   const recognitionRef = useRef<any>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -147,34 +163,48 @@ export default function Companion() {
     const clean = text.replace(/[*_#`>]/g, "").replace(/\([^)]*\)/g, "").replace(/\n{2,}/g, ". ").trim();
     if (!clean) return;
     const utterance = new SpeechSynthesisUtterance(clean);
-    utterance.lang = "en-US";
-    utterance.rate = mode === "interview" ? 0.95 : 1.05;
+
+    // ===== Auto-detect Devanagari script (Hindi) per-utterance =====
+    const hasDevanagari = /[\u0900-\u097F]/.test(clean);
+    const lang = languageRef.current;
+    const useHindiVoice = lang === "hindi" || (lang === "hinglish" && hasDevanagari);
+
+    utterance.lang = useHindiVoice ? "hi-IN" : "en-US";
+    utterance.rate = mode === "interview" ? (useHindiVoice ? 0.9 : 0.95) : (useHindiVoice ? 1.0 : 1.05);
     utterance.pitch = mode === "interview" ? 1.1 : 1.2;
     utterance.volume = 1;
 
     const voices = window.speechSynthesis.getVoices();
-    // Strong preference for clear standard English female voices
     const isFemale = (n: string) =>
-      /female|woman|girl|samantha|zira|susan|karen|tessa|fiona|moira|catherine|allison|ava|serena|victoria|jenny|aria|nancy|amber|emma|sara|amy|joanna|salli|kimberly|kendra|ivy|google us english|microsoft.*female|hazel|libby/i.test(n);
-    const preferred =
-      // 1) US English female (best match)
-      voices.find(v => v.lang === "en-US" && isFemale(v.name)) ||
-      voices.find(v => v.lang === "en-US" && v.name.toLowerCase().includes("google")) ||
-      // 2) UK English female
-      voices.find(v => v.lang === "en-GB" && isFemale(v.name)) ||
-      voices.find(v => v.lang === "en-GB" && v.name.toLowerCase().includes("google")) ||
-      // 3) Any en-US
-      voices.find(v => v.lang === "en-US") ||
-      // 4) Any English female
-      voices.find(v => v.lang.startsWith("en") && isFemale(v.name)) ||
-      // 5) Any English voice
-      voices.find(v => v.lang.startsWith("en"));
+      /female|woman|girl|samantha|zira|susan|karen|tessa|fiona|moira|catherine|allison|ava|serena|victoria|jenny|aria|nancy|amber|emma|sara|amy|joanna|salli|kimberly|kendra|ivy|google us english|microsoft.*female|hazel|libby|swara|kalpana|heera|priya/i.test(n);
+
+    let preferred: SpeechSynthesisVoice | undefined;
+    if (useHindiVoice) {
+      // Prefer Hindi female voice
+      preferred =
+        voices.find(v => v.lang === "hi-IN" && isFemale(v.name)) ||
+        voices.find(v => v.lang === "hi-IN" && v.name.toLowerCase().includes("google")) ||
+        voices.find(v => v.lang === "hi-IN") ||
+        voices.find(v => v.lang.startsWith("hi") && isFemale(v.name)) ||
+        voices.find(v => v.lang.startsWith("hi")) ||
+        // Fallback to en-IN (Indian English) if no Hindi voice
+        voices.find(v => v.lang === "en-IN" && isFemale(v.name)) ||
+        voices.find(v => v.lang === "en-IN");
+    } else {
+      preferred =
+        voices.find(v => v.lang === "en-US" && isFemale(v.name)) ||
+        voices.find(v => v.lang === "en-US" && v.name.toLowerCase().includes("google")) ||
+        voices.find(v => v.lang === "en-GB" && isFemale(v.name)) ||
+        voices.find(v => v.lang === "en-GB" && v.name.toLowerCase().includes("google")) ||
+        voices.find(v => v.lang === "en-US") ||
+        voices.find(v => v.lang.startsWith("en") && isFemale(v.name)) ||
+        voices.find(v => v.lang.startsWith("en"));
+    }
     if (preferred) utterance.voice = preferred;
 
     utterance.onstart = () => setIsSpeaking(true);
     utterance.onend = () => {
       setIsSpeaking(false);
-      // Trigger auto-listen via ref-based handler (avoids stale closure)
       autoListenAfterSpeakRef.current?.();
     };
     utterance.onerror = () => setIsSpeaking(false);
@@ -293,7 +323,11 @@ export default function Companion() {
 
     const recognition = new SR();
     recognitionRef.current = recognition;
-    recognition.lang = "en-US";
+    // Use the user's selected language for speech recognition.
+    // Hindi → hi-IN. Hinglish → hi-IN (handles Hindi + recognises English words too in Chrome).
+    // English → en-US.
+    const lang = languageRef.current;
+    recognition.lang = lang === "hindi" ? "hi-IN" : lang === "hinglish" ? "hi-IN" : "en-US";
     recognition.interimResults = true;
     recognition.continuous = false;
     recognition.maxAlternatives = 1;
@@ -362,7 +396,7 @@ export default function Companion() {
       const res = await fetch("/api/companion/respond", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode, history, message: trimmed }),
+        body: JSON.stringify({ mode, history, message: trimmed, language }),
       });
       if (!res.ok || !res.body) throw new Error("Stream failed");
 
@@ -400,7 +434,7 @@ export default function Companion() {
     } finally {
       setIsStreaming(false);
     }
-  }, [messages, mode, isStreaming, sessionStarted]);
+  }, [messages, mode, language, isStreaming, sessionStarted]);
 
   const handleSend = () => {
     if (input.trim()) sendMessage(input.trim());
@@ -414,7 +448,8 @@ export default function Companion() {
   // SESSION MANAGEMENT
   // ============================================================
   const startSession = useCallback(() => {
-    setMessages([{ id: "welcome", role: "assistant", content: modeInfo.welcomeMsg }]);
+    const welcome = WELCOME_MSGS[mode][language];
+    setMessages([{ id: "welcome", role: "assistant", content: welcome }]);
     setSessionStarted(true);
     sessionStartTime.current = Date.now();
     setShowFeedback(false);
@@ -423,7 +458,7 @@ export default function Companion() {
     if (!cameraOn) {
       startCamera().catch(() => {});
     }
-  }, [modeInfo.welcomeMsg, cameraOn, startCamera]);
+  }, [mode, language, cameraOn, startCamera]);
 
   const switchMode = useCallback((newMode: Mode) => {
     if (newMode === mode) return;
@@ -754,7 +789,33 @@ export default function Companion() {
                   <span className="text-xs text-slate-500">· {messages.filter(m => m.role === "user").length} {mode === "interview" ? "questions answered" : "messages"}</span>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap justify-end">
+                {/* Language selector — English / Hindi / Hinglish */}
+                <div className="flex items-center bg-slate-100 rounded-lg p-0.5 border border-slate-200" role="tablist" aria-label="Language">
+                  {([
+                    { id: "english" as const, label: "EN", title: "English" },
+                    { id: "hinglish" as const, label: "Hinglish", title: "Hindi + English mix" },
+                    { id: "hindi" as const, label: "हिंदी", title: "Hindi" },
+                  ]).map(opt => (
+                    <button
+                      key={opt.id}
+                      onClick={() => {
+                        setLanguage(opt.id);
+                        window.speechSynthesis.cancel();
+                        setIsSpeaking(false);
+                      }}
+                      title={opt.title}
+                      className={cn(
+                        "text-[11px] px-2 py-1 rounded-md font-bold transition-all",
+                        language === opt.id
+                          ? "bg-white text-indigo-700 shadow-sm"
+                          : "text-slate-500 hover:text-slate-700"
+                      )}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
                 <button
                   onClick={() => setVoiceMode(v => !v)}
                   className={cn(
@@ -896,7 +957,7 @@ export default function Companion() {
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-slate-500">
                     {voiceMode && <>🎙️ Voice mode ON · auto-sends · </>}
-                    Indian English · Female voice
+                    {language === "hindi" ? "हिंदी" : language === "hinglish" ? "Hinglish" : "English"} · Female voice
                   </span>
                   <button
                     onClick={endSession}

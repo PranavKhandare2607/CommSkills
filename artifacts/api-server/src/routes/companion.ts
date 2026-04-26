@@ -71,9 +71,27 @@ const FRIEND_PROMPT = `You are Priya, a sweet, caring female best friend from In
 - No markdown formatting — speak naturally
 - Stay positive and safe — if user shares something concerning, encourage them to talk to someone they trust`;
 
+const LANGUAGE_INSTRUCTIONS: Record<string, string> = {
+  english: `\n\n## LANGUAGE
+- Respond in clear, natural ENGLISH only.
+- The user may speak English, Hindi, or a mix — but ALWAYS reply in English.
+- Keep your English warm and easy to understand.`,
+  hindi: `\n\n## LANGUAGE / भाषा
+- सिर्फ हिंदी (देवनागरी लिपि) में जवाब दीजिए।
+- उपयोगकर्ता हिंदी, अंग्रेज़ी या मिक्स में बात कर सकता है, लेकिन आप हमेशा शुद्ध हिंदी (देवनागरी) में ही जवाब दीजिए।
+- भाषा सरल, गर्मजोशी भरी और बातचीत जैसी रखिए। बहुत कठिन शब्द मत इस्तेमाल कीजिए।
+- तकनीकी शब्द (interview, resume, communication, software, etc.) अंग्रेज़ी में रखे जा सकते हैं, बाकी सब हिंदी में।`,
+  hinglish: `\n\n## LANGUAGE — HINGLISH (Hindi + English mix in Roman script)
+- Respond in HINGLISH — Hindi written in English/Roman letters mixed naturally with English words. This is how young Indians chat.
+- Examples: "Haan bilkul, tell me about yourself.", "Achha, that's a great point yaar!", "Aap apne strengths ke baare mein bata sakte hain?"
+- Do NOT use Devanagari script. Write Hindi words in Roman letters (e.g. "kaise ho", "matlab", "samjha").
+- Mix English and Hindi naturally — don't force either language.
+- Keep it casual, warm, and easy to understand.`,
+};
+
 router.post("/companion/respond", async (req, res) => {
   try {
-    const { mode, history, message } = req.body || {};
+    const { mode, history, message, language } = req.body || {};
     if (mode !== "interview" && mode !== "friend") {
       return res.status(400).json({ error: "mode must be 'interview' or 'friend'" });
     }
@@ -86,7 +104,10 @@ router.post("/companion/respond", async (req, res) => {
           .map((h: any) => ({ role: h.role as "user" | "assistant", content: h.content }))
       : [];
 
-    const systemPrompt = mode === "interview" ? INTERVIEW_PROMPT : FRIEND_PROMPT;
+    const langKey = language === "hindi" || language === "hinglish" ? language : "english";
+    const langInstruction = LANGUAGE_INSTRUCTIONS[langKey] || LANGUAGE_INSTRUCTIONS.english;
+    const basePrompt = mode === "interview" ? INTERVIEW_PROMPT : FRIEND_PROMPT;
+    const systemPrompt = basePrompt + langInstruction;
 
     const chatMessages = [
       { role: "system" as const, content: systemPrompt },

@@ -102,6 +102,7 @@ React + Vite frontend — the "CommSkills" Communication Skills Improvement Syst
 - `/talk` — Speaking Practice with live transcript (Web Speech API) + AI feedback
 - `/word` — Word Practice / Vocabulary lookup with definitions, pronunciation, synonyms
 - `/resources` — Static resource cards
+- `/companion` — AI Female Companion (Aisha = interview coach / Priya = friend) with animated SVG avatar, lip-sync, camera preview, voice mode (STT + TTS). Trilingual: English / Hindi (Devanagari) / Hinglish via in-chat language toggle — drives speech recognition lang, TTS voice (hi-IN female preference), and server system-prompt language directive.
 
 Gamification: points system (tracked in DB), badges (Beginner/Explorer/Practitioner/Expert), shown in sidebar bottom + dashboard.
 
@@ -118,6 +119,8 @@ All routes are under `/api`:
 - `GET /progress` — Get user progress + recent activity + chart data
 - `POST /progress` — Update progress (log activity, add points)
 - `POST /speaking/session` — Analyze speaking transcript with AI
+- `POST /companion/respond` — SSE stream from Aisha/Priya. Body: `{mode: "interview"|"friend", history, message, language: "english"|"hindi"|"hinglish"}`. Language directive appended to base system prompt instructs model to reply in pure English, pure Hindi (Devanagari), or Hinglish (Roman script).
+- `POST /companion/feedback` — End-of-session AI feedback (scores + strengths + improvements)
 
 OpenAI integration uses Replit AI Integrations (env: `AI_INTEGRATIONS_OPENAI_BASE_URL`, `AI_INTEGRATIONS_OPENAI_API_KEY`).
 Client: `lib/integrations-openai-ai-server/src/client.ts`

@@ -149,6 +149,68 @@ router.post("/companion/respond", async (req, res) => {
   }
 });
 
+// ============================================================
+// TEXT-TO-SPEECH — generates real Indian-accent female audio
+// using OpenAI gpt-audio (works regardless of user's device voices)
+// ============================================================
+router.post("/companion/speak", async (req, res) => {
+  try {
+    const { text, language, mode } = req.body || {};
+    if (typeof text !== "string" || !text.trim()) {
+      return res.status(400).json({ error: "text is required" });
+    }
+
+    // Clean text: strip markdown / italic tips so the voice doesn't read symbols
+    const clean = text
+      .replace(/[*_#`>]/g, "")
+      .replace(/\([^)]*Tip:[^)]*\)/gi, "")
+      .replace(/\n{2,}/g, ". ")
+      .trim();
+    if (!clean) {
+      return res.status(400).json({ error: "no speakable text" });
+    }
+
+    const langKey = language === "hindi" || language === "hinglish" ? language : "english";
+    // shimmer = warm soft female voice (best for Indian female persona)
+    const voice = "shimmer" as const;
+
+    // Crafted system instructions for accent + persona
+    const personaName = mode === "friend" ? "Priya" : "Aisha";
+    const accentInstruction =
+      langKey === "hindi"
+        ? `You are ${personaName}, a warm Indian woman speaking native Hindi. Read the following Hindi text aloud in a clear, natural, friendly Indian female voice with proper Hindi pronunciation. Use a warm, conversational tone like an Indian woman speaking to a friend. Do NOT translate, do NOT explain — just speak the text exactly as written.`
+        : langKey === "hinglish"
+        ? `You are ${personaName}, a friendly young Indian woman who speaks Hinglish (Hindi mixed with English) the way urban Indians chat in WhatsApp. Read the following Hinglish text aloud in a natural Indian female voice with a warm Indian accent. Pronounce Hindi words (yaar, achha, haan, matlab, bahut, etc.) with proper Hindi pronunciation, and English words with an Indian English accent. Sound friendly and conversational — like a desi best friend. Do NOT translate, do NOT explain — just speak the text exactly as written.`
+        : `You are ${personaName}, a warm professional Indian woman from a top Indian city. Read the following English text aloud in a clear Indian English accent — like a polished Indian HR professional or a friendly Indian bestie. Pronounce words the Indian way (e.g. "really" → "rilly", crisp consonants, soft 'r'). Sound warm and natural. Do NOT translate, do NOT explain — just speak the text exactly as written.`;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-audio",
+      modalities: ["text", "audio"],
+      audio: { voice, format: "mp3" },
+      messages: [
+        { role: "system", content: accentInstruction },
+        { role: "user", content: clean },
+      ],
+    });
+
+    const audioData = (completion.choices[0]?.message as any)?.audio?.data ?? "";
+    if (!audioData) {
+      return res.status(500).json({ error: "No audio returned from model" });
+    }
+    const audioBuffer = Buffer.from(audioData, "base64");
+
+    res.setHeader("Content-Type", "audio/mpeg");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Content-Length", String(audioBuffer.length));
+    res.send(audioBuffer);
+  } catch (err: any) {
+    console.error("Companion TTS error:", err?.message || err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: err?.message || "TTS failed" });
+    }
+  }
+});
+
 router.post("/companion/feedback", async (req, res) => {
   try {
     const { mode, transcript, observations } = req.body || {};

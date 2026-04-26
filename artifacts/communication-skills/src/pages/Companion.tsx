@@ -94,9 +94,6 @@ export default function Companion() {
   const [language, setLanguage] = useState<"english" | "hindi" | "hinglish">("english");
   const languageRef = useRef<"english" | "hindi" | "hinglish">("english");
   useEffect(() => { languageRef.current = language; }, [language]);
-  // Track which voices are actually available so we can warn the user when Hindi is missing
-  const [hasHindiVoice, setHasHindiVoice] = useState(false);
-  const [hasIndianEnglishVoice, setHasIndianEnglishVoice] = useState(false);
   const [activeVoiceName, setActiveVoiceName] = useState<string>("");
 
   const recognitionRef = useRef<any>(null);
@@ -111,6 +108,10 @@ export default function Companion() {
   const isListeningRef = useRef<boolean>(false);
   const sendMessageRef = useRef<((t: string) => void) | null>(null);
   const startListeningRef = useRef<(() => void) | null>(null);
+  // HTMLAudioElement for server-generated TTS playback (real Indian voice)
+  const audioElRef = useRef<HTMLAudioElement | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
+  const ttsAbortRef = useRef<AbortController | null>(null);
 
   // Sync refs with state for use inside callbacks/event handlers
   useEffect(() => { voiceModeRef.current = voiceMode; }, [voiceMode]);
@@ -127,21 +128,13 @@ export default function Companion() {
     try { setInIframe(window.self !== window.top); } catch { setInIframe(true); }
   }, []);
 
-  // Preload speech voices and detect Hindi/Indian English availability
+  // Preload browser voices (only used as a last-resort fallback if server TTS fails)
   useEffect(() => {
-    const loadVoices = () => {
-      const voices = window.speechSynthesis.getVoices();
-      setHasHindiVoice(voices.some(v => v.lang === "hi-IN" || v.lang.startsWith("hi")));
-      setHasIndianEnglishVoice(voices.some(v => v.lang === "en-IN"));
-      // Helpful debug: list all available voices once loaded
-      if (voices.length > 0) {
-        // eslint-disable-next-line no-console
-        console.log("[CommSkills] Available voices:", voices.map(v => `${v.name} (${v.lang})`));
-      }
-    };
-    loadVoices();
-    window.speechSynthesis.onvoiceschanged = loadVoices;
-    return () => { window.speechSynthesis.onvoiceschanged = null; };
+    try {
+      window.speechSynthesis.getVoices();
+      window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+    } catch {}
+    return () => { try { window.speechSynthesis.onvoiceschanged = null; } catch {} };
   }, []);
 
   // Auto scroll
@@ -152,7 +145,15 @@ export default function Companion() {
   // Cleanup
   useEffect(() => {
     return () => {
-      window.speechSynthesis.cancel();
+      try { window.speechSynthesis.cancel(); } catch {}
+      ttsAbortRef.current?.abort();
+      if (audioElRef.current) {
+        try { audioElRef.current.pause(); } catch {}
+      }
+      if (audioUrlRef.current) {
+        URL.revokeObjectURL(audioUrlRef.current);
+        audioUrlRef.current = null;
+      }
       stopCamera();
       recognitionRef.current?.stop();
     };
@@ -171,87 +172,97 @@ export default function Companion() {
   // ============================================================
   // SPEECH SYNTHESIS — Standard English Female (US/UK)
   // ============================================================
-  const speakText = useCallback((text: string) => {
-    window.speechSynthesis.cancel();
+  // Cleanly stop any ongoing speech (both server audio and any browser TTS leftovers)
+  const stopAllSpeech = useCallback(() => {
+    try { window.speechSynthesis.cancel(); } catch {}
+    ttsAbortRef.current?.abort();
+    ttsAbortRef.current = null;
+    if (audioElRef.current) {
+      try {
+        audioElRef.current.pause();
+        audioElRef.current.removeAttribute("src");
+        audioElRef.current.load();
+      } catch {}
+    }
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = null;
+    }
+    setIsSpeaking(false);
+  }, []);
+
+  const speakText = useCallback(async (text: string) => {
+    // Stop anything currently speaking first
+    stopAllSpeech();
     const clean = text.replace(/[*_#`>]/g, "").replace(/\([^)]*\)/g, "").replace(/\n{2,}/g, ". ").trim();
     if (!clean) return;
 
-    // ===== Detect Devanagari script (Hindi) per-utterance =====
-    const hasDevanagari = /[\u0900-\u097F]/.test(clean);
     const lang = languageRef.current;
-    const wantHindiVoice = lang === "hindi" || (lang === "hinglish" && hasDevanagari);
+    setActiveVoiceName(lang === "hindi" ? "Indian Hindi voice" : lang === "hinglish" ? "Indian Hinglish voice" : "Indian English voice");
 
-    const voices = window.speechSynthesis.getVoices();
-    const isFemale = (n: string) =>
-      /female|woman|girl|samantha|zira|susan|karen|tessa|fiona|moira|catherine|allison|ava|serena|victoria|jenny|aria|nancy|amber|emma|sara|amy|joanna|salli|kimberly|kendra|ivy|hazel|libby|swara|kalpana|heera|veena|priya|raveena|isha|aditi|lekha|google.*hindi|google.*india|microsoft.*heera|microsoft.*kalpana/i.test(n);
+    // Show speaking state immediately while audio is being generated
+    setIsSpeaking(true);
 
-    let preferred: SpeechSynthesisVoice | undefined;
-    let actualLang = "en-IN"; // default to Indian English accent
+    const ctrl = new AbortController();
+    ttsAbortRef.current = ctrl;
 
-    if (wantHindiVoice) {
-      // 1) Prefer real Hindi female voice
-      preferred =
-        voices.find(v => v.lang === "hi-IN" && isFemale(v.name)) ||
-        voices.find(v => v.lang === "hi-IN" && /google/i.test(v.name)) ||
-        voices.find(v => v.lang === "hi-IN") ||
-        voices.find(v => v.lang.startsWith("hi") && isFemale(v.name)) ||
-        voices.find(v => v.lang.startsWith("hi"));
-      if (preferred) {
-        actualLang = "hi-IN";
-      } else {
-        // 2) No Hindi voice on this device — use Indian English voice but tag as hi-IN
-        // so the OS may still pronounce Devanagari correctly if it has any Hindi support.
-        preferred =
-          voices.find(v => v.lang === "en-IN" && isFemale(v.name)) ||
-          voices.find(v => v.lang === "en-IN") ||
-          voices.find(v => v.lang.startsWith("en") && isFemale(v.name)) ||
-          voices.find(v => v.lang.startsWith("en"));
-        actualLang = "hi-IN";
+    try {
+      const res = await fetch("/api/companion/speak", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: clean, language: lang, mode }),
+        signal: ctrl.signal,
+      });
+      if (!res.ok) throw new Error(`TTS HTTP ${res.status}`);
+      const blob = await res.blob();
+      // If we were aborted while waiting, bail
+      if (ctrl.signal.aborted) return;
+
+      const url = URL.createObjectURL(blob);
+      audioUrlRef.current = url;
+
+      // Reuse a single audio element across utterances
+      if (!audioElRef.current) {
+        audioElRef.current = new Audio();
       }
-    } else {
-      // English or Hinglish (Roman script) — use INDIAN ENGLISH (en-IN) for Indian accent
-      preferred =
-        voices.find(v => v.lang === "en-IN" && isFemale(v.name)) ||
-        voices.find(v => v.lang === "en-IN" && /google|microsoft/i.test(v.name)) ||
-        voices.find(v => v.lang === "en-IN") ||
-        // Hindi voice can also speak English in Indian accent — use as fallback
-        voices.find(v => v.lang === "hi-IN" && isFemale(v.name)) ||
-        voices.find(v => v.lang === "hi-IN") ||
-        // British English female (closer to Indian than US)
-        voices.find(v => v.lang === "en-GB" && isFemale(v.name)) ||
-        voices.find(v => v.lang === "en-GB") ||
-        // Last resort: any English female
-        voices.find(v => v.lang.startsWith("en") && isFemale(v.name)) ||
-        voices.find(v => v.lang.startsWith("en"));
-      actualLang = "en-IN";
+      const audio = audioElRef.current;
+      audio.src = url;
+      audio.onplay = () => setIsSpeaking(true);
+      audio.onended = () => {
+        setIsSpeaking(false);
+        if (audioUrlRef.current) {
+          URL.revokeObjectURL(audioUrlRef.current);
+          audioUrlRef.current = null;
+        }
+        autoListenAfterSpeakRef.current?.();
+      };
+      audio.onerror = () => {
+        console.warn("[CommSkills] Audio playback error");
+        setIsSpeaking(false);
+      };
+      try {
+        await audio.play();
+      } catch (playErr) {
+        console.warn("[CommSkills] audio.play() rejected:", playErr);
+        setIsSpeaking(false);
+      }
+    } catch (err: any) {
+      if (err?.name === "AbortError") return;
+      console.warn("[CommSkills] Server TTS failed, falling back to browser:", err?.message || err);
+      // Last-resort fallback to browser TTS so the user still hears something
+      try {
+        const u = new SpeechSynthesisUtterance(clean);
+        u.lang = lang === "hindi" ? "hi-IN" : "en-IN";
+        u.rate = mode === "interview" ? 0.95 : 1.05;
+        u.pitch = 1.1;
+        u.onend = () => { setIsSpeaking(false); autoListenAfterSpeakRef.current?.(); };
+        u.onerror = () => setIsSpeaking(false);
+        window.speechSynthesis.speak(u);
+      } catch {
+        setIsSpeaking(false);
+      }
     }
-
-    const utterance = new SpeechSynthesisUtterance(clean);
-    utterance.lang = actualLang;
-    utterance.rate = mode === "interview" ? (wantHindiVoice ? 0.88 : 0.92) : (wantHindiVoice ? 0.95 : 1.0);
-    utterance.pitch = mode === "interview" ? 1.1 : 1.2;
-    utterance.volume = 1;
-    if (preferred) {
-      utterance.voice = preferred;
-      setActiveVoiceName(`${preferred.name} (${preferred.lang})`);
-    } else {
-      setActiveVoiceName(`default ${actualLang}`);
-    }
-
-    // eslint-disable-next-line no-console
-    console.log("[CommSkills] Speaking:", { lang: actualLang, voice: preferred?.name || "default", text: clean.slice(0, 60) });
-
-    utterance.onstart = () => setIsSpeaking(true);
-    utterance.onend = () => {
-      setIsSpeaking(false);
-      autoListenAfterSpeakRef.current?.();
-    };
-    utterance.onerror = (e: any) => {
-      console.warn("[CommSkills] TTS error:", e?.error || e);
-      setIsSpeaking(false);
-    };
-    window.speechSynthesis.speak(utterance);
-  }, [mode]);
+  }, [mode, stopAllSpeech]);
 
   // Ref to call the latest auto-listen handler from speakText.onend
   const autoListenAfterSpeakRef = useRef<(() => void) | null>(null);
@@ -361,7 +372,7 @@ export default function Companion() {
       }
       return;
     }
-    window.speechSynthesis.cancel();
+    stopAllSpeech();
 
     const recognition = new SR();
     recognitionRef.current = recognition;
@@ -423,8 +434,7 @@ export default function Companion() {
       sessionStartTime.current = Date.now();
     }
 
-    window.speechSynthesis.cancel();
-    setIsSpeaking(false);
+    stopAllSpeech();
 
     const userMsg: Msg = { id: `u-${Date.now()}`, role: "user", content: trimmed };
     const botId = `a-${Date.now() + 1}`;
@@ -504,8 +514,7 @@ export default function Companion() {
 
   const switchMode = useCallback((newMode: Mode) => {
     if (newMode === mode) return;
-    window.speechSynthesis.cancel();
-    setIsSpeaking(false);
+    stopAllSpeech();
     setMode(newMode);
     setMessages([]);
     setShowFeedback(false);
@@ -561,7 +570,7 @@ export default function Companion() {
   }, [messages, mode, cameraOn, updateProgress, queryClient]);
 
   const resetSession = useCallback(() => {
-    window.speechSynthesis.cancel();
+    stopAllSpeech();
     setMessages([]);
     setShowFeedback(false);
     setFeedback(null);
@@ -843,8 +852,7 @@ export default function Companion() {
                       key={opt.id}
                       onClick={() => {
                         setLanguage(opt.id);
-                        window.speechSynthesis.cancel();
-                        setIsSpeaking(false);
+                        stopAllSpeech();
                       }}
                       title={opt.title}
                       className={cn(
@@ -870,7 +878,7 @@ export default function Companion() {
                   {voiceMode ? "Voice ON" : "Voice OFF"}
                 </button>
                 <button
-                  onClick={() => { setIsMuted(m => !m); window.speechSynthesis.cancel(); setIsSpeaking(false); }}
+                  onClick={() => { setIsMuted(m => !m); stopAllSpeech(); }}
                   className={cn(
                     "text-xs px-2.5 py-1 rounded-lg font-medium border flex items-center gap-1",
                     isMuted ? "bg-slate-100 text-slate-500 border-slate-200" : "bg-indigo-50 text-indigo-600 border-indigo-100"
@@ -1001,13 +1009,7 @@ export default function Companion() {
                     {voiceMode && <>🎙️ Voice mode ON · </>}
                     {language === "hindi" ? "हिंदी" : language === "hinglish" ? "Hinglish" : "English"}
                     {" · "}
-                    Indian female voice
-                    {activeVoiceName && <span className="text-slate-400"> · {activeVoiceName}</span>}
-                    {language === "hindi" && !hasHindiVoice && (
-                      <span className="ml-1 text-amber-600 font-medium">
-                        · ⚠ No Hindi voice on this device — using English fallback
-                      </span>
-                    )}
+                    {activeVoiceName || "Indian female voice (AI-generated)"}
                   </span>
                   <button
                     onClick={endSession}

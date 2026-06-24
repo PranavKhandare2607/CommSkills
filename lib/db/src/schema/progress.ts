@@ -4,6 +4,7 @@ import { z } from "zod/v4";
 
 export const userProgressTable = pgTable("user_progress", {
   id: serial("id").primaryKey(),
+  userId: text("user_id"),
   points: integer("points").notNull().default(0),
   badge: text("badge").notNull().default("Beginner"),
   grammarAccuracy: real("grammar_accuracy").notNull().default(0),
@@ -14,6 +15,7 @@ export const userProgressTable = pgTable("user_progress", {
 
 export const activityLogTable = pgTable("activity_log", {
   id: serial("id").primaryKey(),
+  userId: text("user_id"),
   type: text("type").notNull(),
   description: text("description").notNull(),
   pointsEarned: integer("points_earned").notNull().default(0),

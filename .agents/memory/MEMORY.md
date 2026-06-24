@@ -1,0 +1,1 @@
+- [Clerk Auth setup](clerk-auth-setup.md) — Clerk is provisioned (Replit-managed), wired in server + React frontend with per-user progress DB.

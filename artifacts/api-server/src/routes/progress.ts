@@ -1,7 +1,8 @@
 import { Router, type IRouter } from "express";
 import { db, userProgressTable, activityLogTable } from "@workspace/db";
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { UpdateProgressBody } from "@workspace/api-zod";
+import { requireAuth } from "../middlewares/requireAuth";
 
 const router: IRouter = Router();
 
@@ -12,22 +13,31 @@ function getBadge(points: number): string {
   return "Beginner";
 }
 
-async function getOrCreateProgress() {
-  const rows = await db.select().from(userProgressTable).limit(1);
+async function getOrCreateProgress(userId: string) {
+  const rows = await db
+    .select()
+    .from(userProgressTable)
+    .where(eq(userProgressTable.userId, userId))
+    .limit(1);
   if (rows.length > 0) return rows[0];
 
-  const [created] = await db.insert(userProgressTable).values({}).returning();
+  const [created] = await db
+    .insert(userProgressTable)
+    .values({ userId })
+    .returning();
   return created;
 }
 
 // GET /progress
-router.get("/progress", async (req, res) => {
-  const progress = await getOrCreateProgress();
+router.get("/progress", requireAuth, async (req, res) => {
+  const userId = (req as typeof req & { userId: string }).userId;
+  const progress = await getOrCreateProgress(userId);
 
   // Get recent activity (last 10)
   const recentActivity = await db
     .select()
     .from(activityLogTable)
+    .where(eq(activityLogTable.userId, userId))
     .orderBy(desc(activityLogTable.createdAt))
     .limit(10);
 
@@ -66,9 +76,10 @@ router.get("/progress", async (req, res) => {
 });
 
 // POST /progress
-router.post("/progress", async (req, res) => {
+router.post("/progress", requireAuth, async (req, res) => {
+  const userId = (req as typeof req & { userId: string }).userId;
   const body = UpdateProgressBody.parse(req.body);
-  const progress = await getOrCreateProgress();
+  const progress = await getOrCreateProgress(userId);
 
   // Update progress record
   const newPoints = progress.points + body.pointsEarned;
@@ -97,16 +108,18 @@ router.post("/progress", async (req, res) => {
 
   // Log activity
   await db.insert(activityLogTable).values({
+    userId,
     type: body.type,
     description: body.description,
     pointsEarned: body.pointsEarned,
     accuracy: body.accuracy ?? null,
   });
 
-  // Get recent activity
+  // Get recent activity for this user
   const recentActivity = await db
     .select()
     .from(activityLogTable)
+    .where(eq(activityLogTable.userId, userId))
     .orderBy(desc(activityLogTable.createdAt))
     .limit(10);
 

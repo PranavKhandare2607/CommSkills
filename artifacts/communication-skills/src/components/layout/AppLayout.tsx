@@ -16,6 +16,7 @@ import {
   Star,
   Crown,
   Zap,
+  MessageCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -144,6 +145,17 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 </button>
               </Link>
             )}
+
+            {/* Help — WhatsApp */}
+            <a
+              href="https://wa.me/918796439008"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white text-xs font-semibold py-2.5 rounded-xl transition-all"
+            >
+              <MessageCircle className="w-3.5 h-3.5" />
+              Help &amp; Support
+            </a>
           </div>
         </div>
       </aside>

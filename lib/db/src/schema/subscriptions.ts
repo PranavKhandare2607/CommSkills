@@ -9,6 +9,7 @@ export const subscriptionsTable = pgTable("subscriptions", {
   status: text("status").notNull().default("trial"),
   trialStartedAt: timestamp("trial_started_at").defaultNow().notNull(),
   trialEndsAt: timestamp("trial_ends_at").notNull(),
+  activeSessionId: text("active_session_id"),
   stripeCustomerId: text("stripe_customer_id"),
   stripeSubscriptionId: text("stripe_subscription_id"),
   stripeStatus: text("stripe_status"),

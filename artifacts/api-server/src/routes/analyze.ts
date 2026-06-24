@@ -1,10 +1,18 @@
 import { Router, type IRouter } from "express";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { AnalyzeCommunicationBody } from "@workspace/api-zod";
+import { requireAuth } from "../middlewares/requireAuth";
+import { checkLockedFeatureAccess } from "../lib/subscriptionUtils";
 
 const router: IRouter = Router();
 
-router.post("/analyze", async (req, res) => {
+router.post("/analyze", requireAuth, async (req, res) => {
+  const userId = (req as typeof req & { userId: string }).userId;
+  const hasAccess = await checkLockedFeatureAccess(userId);
+  if (!hasAccess) {
+    res.status(402).json({ error: "Premium required", limitType: "analyzer", locked: true });
+    return;
+  }
   const body = AnalyzeCommunicationBody.parse(req.body);
 
   try {

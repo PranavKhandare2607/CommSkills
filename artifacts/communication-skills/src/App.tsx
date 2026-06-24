@@ -11,6 +11,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import Landing from "@/pages/Landing";
 import SignInPage from "@/pages/SignIn";
 import SignUpPage from "@/pages/SignUp";
+import Pricing from "@/pages/Pricing";
 import Dashboard from "@/pages/Dashboard";
 import AIAssistant from "@/pages/AIAssistant";
 import Analyzer from "@/pages/Analyzer";
@@ -166,6 +167,7 @@ function Router() {
       <Route path="/word" component={() => <ProtectedRoute component={Vocabulary} />} />
       <Route path="/companion" component={() => <ProtectedRoute component={Companion} />} />
       <Route path="/resources" component={() => <ProtectedRoute component={Resources} />} />
+      <Route path="/pricing" component={Pricing} />
       <Route component={NotFound} />
     </Switch>
   );

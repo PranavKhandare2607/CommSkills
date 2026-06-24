@@ -1,10 +1,18 @@
 import { Router, type IRouter } from "express";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { LookupVocabularyBody } from "@workspace/api-zod";
+import { requireAuth } from "../middlewares/requireAuth";
+import { checkAndIncrementUsage } from "../lib/subscriptionUtils";
 
 const router: IRouter = Router();
 
-router.post("/vocabulary/lookup", async (req, res) => {
+router.post("/vocabulary/lookup", requireAuth, async (req, res) => {
+  const userId = (req as typeof req & { userId: string }).userId;
+  const usage = await checkAndIncrementUsage(userId, "vocabulary");
+  if (!usage.allowed) {
+    res.status(402).json({ error: "Daily limit reached", limitType: "vocabulary", limit: usage.limit, remaining: 0 });
+    return;
+  }
   const body = LookupVocabularyBody.parse(req.body);
 
   try {

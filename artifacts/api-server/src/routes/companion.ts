@@ -1,5 +1,7 @@
 import { Router, type IRouter } from "express";
 import { openai } from "@workspace/integrations-openai-ai-server";
+import { requireAuth } from "../middlewares/requireAuth";
+import { checkLockedFeatureAccess } from "../lib/subscriptionUtils";
 
 const router: IRouter = Router();
 
@@ -92,7 +94,13 @@ const LANGUAGE_INSTRUCTIONS: Record<string, string> = {
 - Keep it casual, warm, and easy to understand.`,
 };
 
-router.post("/companion/respond", async (req, res) => {
+router.post("/companion/respond", requireAuth, async (req, res) => {
+  const userId = (req as typeof req & { userId: string }).userId;
+  const hasAccess = await checkLockedFeatureAccess(userId);
+  if (!hasAccess) {
+    res.status(402).json({ error: "Premium required", limitType: "companion", locked: true });
+    return;
+  }
   try {
     const { mode, history, message, language } = req.body || {};
     if (mode !== "interview" && mode !== "friend") {
@@ -153,7 +161,13 @@ router.post("/companion/respond", async (req, res) => {
 // TEXT-TO-SPEECH — generates real Indian-accent female audio
 // using OpenAI gpt-audio (works regardless of user's device voices)
 // ============================================================
-router.post("/companion/speak", async (req, res) => {
+router.post("/companion/speak", requireAuth, async (req, res) => {
+  const userId = (req as typeof req & { userId: string }).userId;
+  const hasAccess = await checkLockedFeatureAccess(userId);
+  if (!hasAccess) {
+    res.status(402).json({ error: "Premium required", limitType: "companion", locked: true });
+    return;
+  }
   try {
     const { text, language, mode } = req.body || {};
     if (typeof text !== "string" || !text.trim()) {

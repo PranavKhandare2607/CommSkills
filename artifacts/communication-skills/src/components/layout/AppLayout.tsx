@@ -13,11 +13,15 @@ import {
   Menu, 
   X,
   Trophy,
-  Star
+  Star,
+  Crown,
+  Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { useGetProgress } from "@workspace/api-client-react";
+import { useSubscription } from "@/hooks/useSubscription";
+import { TrialBanner } from "@/components/TrialBanner";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -35,6 +39,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { data: progress } = useGetProgress();
+  const { data: sub } = useSubscription();
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
@@ -82,17 +87,63 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           })}
         </nav>
         
-        <div className="p-5 border-t border-indigo-900/50 bg-indigo-950/50">
-          <div className="bg-indigo-900/40 rounded-xl p-4 border border-indigo-800/50 flex flex-col gap-2 relative overflow-hidden group">
-            <div className="absolute -right-4 -top-4 w-16 h-16 bg-indigo-500/10 rounded-full blur-xl group-hover:bg-indigo-500/20 transition-colors"></div>
-            <div className="flex items-center gap-2 text-indigo-100">
-              <Trophy className="w-4 h-4 text-amber-400" />
-              <span className="font-semibold text-sm">{progress?.points?.toLocaleString() || 0} pts</span>
+        <div className="border-t border-indigo-900/50 bg-indigo-950/50">
+          {sub?.isInTrial && <TrialBanner />}
+          <div className="p-4 space-y-3">
+            {/* Points + Badge */}
+            <div className="bg-indigo-900/40 rounded-xl p-3 border border-indigo-800/50 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-indigo-100">
+                <Trophy className="w-4 h-4 text-amber-400" />
+                <span className="font-semibold text-sm">{progress?.points?.toLocaleString() || 0} pts</span>
+              </div>
+              <div className="flex items-center gap-1.5 text-indigo-300 text-xs">
+                <Star className="w-3 h-3" />
+                <span className="text-indigo-100 font-medium">{progress?.badge || "Beginner"}</span>
+              </div>
             </div>
-            <div className="flex items-center gap-2 text-indigo-300 text-xs">
-              <Star className="w-3.5 h-3.5" />
-              <span>Rank: <strong className="text-indigo-100">{progress?.badge || "Beginner"}</strong></span>
-            </div>
+
+            {/* Usage bars — only show for free users */}
+            {sub && !sub.isPremium && (
+              <div className="space-y-1.5">
+                <p className="text-indigo-400 text-xs font-semibold uppercase tracking-wider px-1">Today's Usage</p>
+                {[
+                  { label: "Grammar", used: sub.usage.grammar, limit: sub.limits.grammar },
+                  { label: "Vocabulary", used: sub.usage.vocabulary, limit: sub.limits.vocabulary },
+                  { label: "AI Coach", used: sub.usage.aiMessages, limit: sub.limits.aiMessages },
+                ].map(({ label, used, limit }) => (
+                  <div key={label} className="px-1">
+                    <div className="flex justify-between text-xs text-indigo-300 mb-1">
+                      <span>{label}</span>
+                      <span>{used}/{limit}</span>
+                    </div>
+                    <div className="h-1 bg-indigo-900 rounded-full overflow-hidden">
+                      <div
+                        className={cn(
+                          "h-full rounded-full transition-all",
+                          used >= limit ? "bg-red-400" : "bg-indigo-400"
+                        )}
+                        style={{ width: `${Math.min(100, (used / limit) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Upgrade / Premium badge */}
+            {sub?.isPremium ? (
+              <div className="flex items-center gap-2 text-amber-300 text-xs font-semibold px-1">
+                <Crown className="w-3.5 h-3.5" />
+                <span>{sub.isInTrial ? `Trial · ${sub.trialDaysRemaining}d left` : "Premium Active"}</span>
+              </div>
+            ) : (
+              <Link href="/pricing">
+                <button className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-500 to-violet-500 hover:from-indigo-400 hover:to-violet-400 text-white text-xs font-semibold py-2.5 rounded-xl transition-all">
+                  <Zap className="w-3.5 h-3.5" />
+                  Upgrade to Premium
+                </button>
+              </Link>
+            )}
           </div>
         </div>
       </aside>

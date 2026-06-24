@@ -7,10 +7,12 @@ import analyzeRouter from "./analyze";
 import progressRouter from "./progress";
 import speakingRouter from "./speaking";
 import companionRouter from "./companion";
+import subscriptionRouter from "./subscription";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use(subscriptionRouter);
 router.use(openaiRouter);
 router.use(grammarRouter);
 router.use(vocabularyRouter);

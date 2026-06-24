@@ -92,7 +92,7 @@ export default function Pricing() {
               </div>
               <p className="text-indigo-200 text-sm">Everything, unlimited</p>
               <div className="mt-4">
-                <span className="text-4xl font-extrabold">$9.99</span>
+                <span className="text-4xl font-extrabold">₹110</span>
                 <span className="text-indigo-300 ml-2">/ month</span>
               </div>
             </div>
@@ -115,7 +115,7 @@ export default function Pricing() {
                     className="w-full bg-white text-indigo-600 hover:bg-indigo-50 font-bold py-3 rounded-xl transition-colors mb-2"
                     onClick={() => alert("Stripe integration coming soon! Connect your Stripe account to enable payments.")}
                   >
-                    {isInTrial ? `Upgrade Now — Lock In $9.99/mo` : "Start 10-Day Free Trial"}
+                    {isInTrial ? `Upgrade Now — Lock In ₹110/mo` : "Start 10-Day Free Trial"}
                   </button>
                   <p className="text-indigo-200 text-xs text-center">
                     {isInTrial ? "Cancel anytime" : "10 days free · No credit card required"}

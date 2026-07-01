@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Sparkles, Mic, MicOff, Camera, CameraOff, Volume2, VolumeX,
   Briefcase, Heart, Send, RotateCcw, AlertCircle, Trophy,
-  CheckCircle2, TrendingUp, Award, MessageSquareText
+  CheckCircle2, TrendingUp, Award, MessageSquareText, Phone, PhoneOff
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FemaleAvatar } from "@/components/companion/FemaleAvatar";
@@ -95,6 +95,10 @@ export default function Companion() {
   const languageRef = useRef<"english" | "hindi" | "hinglish">("english");
   useEffect(() => { languageRef.current = language; }, [language]);
   const [activeVoiceName, setActiveVoiceName] = useState<string>("");
+  const [isCallActive, setIsCallActive] = useState(false);
+  const [callStatus, setCallStatus] = useState<"ringing" | "connected">("ringing");
+  const [callSeconds, setCallSeconds] = useState(0);
+  const callTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const recognitionRef = useRef<any>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -565,6 +569,49 @@ export default function Companion() {
     }
   }, [mode, language, cameraOn, startCamera, speakText]);
 
+  // ============================================================
+  // "CALL" — in-app, phone-call-style voice conversation
+  // (no real phone number involved — this rings & connects inside the browser)
+  // ============================================================
+  const startCall = useCallback(() => {
+    stopAllSpeech();
+    setIsCallActive(true);
+    setCallStatus("ringing");
+    setCallSeconds(0);
+    setVoiceMode(true);
+    setIsMuted(false);
+    if (!sessionStarted) {
+      startSession();
+    }
+    // Brief "ringing" beat for realism, then connect and let her speak first.
+    setTimeout(() => {
+      setCallStatus("connected");
+      if (callTimerRef.current) clearInterval(callTimerRef.current);
+      callTimerRef.current = setInterval(() => setCallSeconds(s => s + 1), 1000);
+      if (sessionStarted) {
+        // Session already running (e.g. resumed) — jump straight into listening.
+        setTimeout(() => startListeningRef.current?.(), 300);
+      }
+    }, 1600);
+  }, [sessionStarted, startSession, stopAllSpeech]);
+
+  const endCall = useCallback(() => {
+    stopAllSpeech();
+    stopListening();
+    setIsCallActive(false);
+    setCallStatus("ringing");
+    setCallSeconds(0);
+    if (callTimerRef.current) { clearInterval(callTimerRef.current); callTimerRef.current = null; }
+  }, [stopAllSpeech, stopListening]);
+
+  useEffect(() => () => { if (callTimerRef.current) clearInterval(callTimerRef.current); }, []);
+
+  const formatCallTime = (secs: number) => {
+    const m = Math.floor(secs / 60).toString().padStart(2, "0");
+    const s = (secs % 60).toString().padStart(2, "0");
+    return `${m}:${s}`;
+  };
+
   const switchMode = useCallback((newMode: Mode) => {
     if (newMode === mode) return;
     stopAllSpeech();
@@ -689,7 +736,32 @@ export default function Companion() {
               </h1>
               <p className="text-slate-500 text-base mt-0.5">Practice interviews or chat with a friendly AI companion — voice, camera & feedback</p>
             </div>
+            <button
+              onClick={startCall}
+              className={cn(
+                "ml-auto hidden sm:flex items-center gap-2 px-5 py-3 rounded-2xl font-bold text-white shadow-lg transition-all hover:scale-105 shrink-0",
+                mode === "interview"
+                  ? "bg-gradient-to-r from-indigo-600 to-blue-600 shadow-indigo-500/30"
+                  : "bg-gradient-to-r from-rose-500 to-pink-500 shadow-rose-500/30"
+              )}
+              title="Start a live voice call in-app (no real phone number needed)"
+            >
+              <Phone className="w-5 h-5" />
+              Call {mode === "interview" ? "Aisha" : "Priya"}
+            </button>
           </div>
+          <button
+            onClick={startCall}
+            className={cn(
+              "sm:hidden w-full flex items-center justify-center gap-2 px-5 py-3 rounded-2xl font-bold text-white shadow-lg transition-all",
+              mode === "interview"
+                ? "bg-gradient-to-r from-indigo-600 to-blue-600"
+                : "bg-gradient-to-r from-rose-500 to-pink-500"
+            )}
+          >
+            <Phone className="w-5 h-5" />
+            Call {mode === "interview" ? "Aisha" : "Priya"}
+          </button>
         </motion.div>
 
         {/* Mode Selector — choose your companion */}
@@ -1179,6 +1251,104 @@ export default function Companion() {
                   </div>
                 </div>
               </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* In-App Call Overlay — full-screen phone-call-style voice session */}
+        <AnimatePresence>
+          {isCallActive && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className={cn(
+                "fixed inset-0 z-[100] flex flex-col items-center justify-between text-white p-6 sm:p-10",
+                mode === "interview"
+                  ? "bg-gradient-to-br from-indigo-950 via-indigo-900 to-blue-950"
+                  : "bg-gradient-to-br from-rose-950 via-rose-900 to-pink-950"
+              )}
+            >
+              {/* Top: status */}
+              <div className="text-center mt-6">
+                <p className="text-sm font-medium text-white/60 uppercase tracking-wide">
+                  {callStatus === "ringing" ? "Calling..." : "In-app voice call"}
+                </p>
+                <p className="text-3xl font-display font-bold mt-1">
+                  {mode === "interview" ? "Aisha" : "Priya"}
+                </p>
+                <p className="text-white/50 text-sm mt-1">
+                  {callStatus === "ringing" ? "Connecting inside CommSkills" : formatCallTime(callSeconds)}
+                </p>
+              </div>
+
+              {/* Middle: avatar */}
+              <div className="flex flex-col items-center">
+                <motion.div
+                  animate={callStatus === "ringing" ? { scale: [1, 1.06, 1] } : { scale: 1 }}
+                  transition={callStatus === "ringing" ? { duration: 1.1, repeat: Infinity } : {}}
+                  className={cn(
+                    "w-52 h-52 sm:w-64 sm:h-64 rounded-full p-1.5",
+                    isSpeaking
+                      ? "bg-gradient-to-br from-emerald-400 to-emerald-600 animate-pulse"
+                      : isListening
+                      ? "bg-gradient-to-br from-rose-400 to-rose-600 animate-pulse"
+                      : "bg-white/10"
+                  )}
+                >
+                  <div className="w-full h-full rounded-full overflow-hidden bg-white/5">
+                    <FemaleAvatar
+                      isSpeaking={isSpeaking}
+                      isListening={isListening}
+                      mode={mode}
+                      expression={isStreaming ? "neutral" : isListening ? "smile" : "smile"}
+                    />
+                  </div>
+                </motion.div>
+                <div className="mt-5 text-sm font-medium">
+                  {callStatus === "ringing" ? (
+                    <span className="text-white/70">Ringing...</span>
+                  ) : isSpeaking ? (
+                    <span className="text-emerald-300 flex items-center gap-1.5"><Volume2 className="w-4 h-4" /> Speaking...</span>
+                  ) : isListening ? (
+                    <span className="text-rose-300 flex items-center gap-1.5 animate-pulse"><Mic className="w-4 h-4" /> Listening...</span>
+                  ) : (
+                    <span className="text-white/60">Go ahead, say something</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Bottom: controls */}
+              <div className="flex items-center gap-6 mb-6">
+                <button
+                  onClick={() => { setIsMuted(m => !m); if (!isMuted) stopAllSpeech(); }}
+                  className={cn(
+                    "w-14 h-14 rounded-full flex items-center justify-center transition-all",
+                    isMuted ? "bg-white text-slate-900" : "bg-white/15 text-white hover:bg-white/25"
+                  )}
+                  title={isMuted ? "Unmute" : "Mute her voice"}
+                >
+                  {isMuted ? <VolumeX className="w-6 h-6" /> : <Volume2 className="w-6 h-6" />}
+                </button>
+                <button
+                  onClick={endCall}
+                  className="w-16 h-16 rounded-full bg-rose-600 hover:bg-rose-700 flex items-center justify-center shadow-xl shadow-rose-900/50 transition-all hover:scale-105"
+                  title="End call"
+                >
+                  <PhoneOff className="w-7 h-7 text-white" />
+                </button>
+                <button
+                  onClick={isListening ? stopListening : startListening}
+                  disabled={callStatus === "ringing" || isStreaming}
+                  className={cn(
+                    "w-14 h-14 rounded-full flex items-center justify-center transition-all disabled:opacity-40",
+                    isListening ? "bg-rose-500 text-white animate-pulse" : "bg-white/15 text-white hover:bg-white/25"
+                  )}
+                  title={isListening ? "Stop talking" : "Talk now"}
+                >
+                  {isListening ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
+                </button>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>

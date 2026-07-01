@@ -1,1 +1,2 @@
 - [Clerk Auth setup](clerk-auth-setup.md) — Clerk is provisioned (Replit-managed), wired in server + React frontend with per-user progress DB.
+- [Companion voice-chat latency](companion-tts-latency.md) — TTS must start per-sentence during streaming, not after the full LLM reply finishes.

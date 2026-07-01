@@ -101,7 +101,6 @@ export default function Companion() {
   const streamRef = useRef<MediaStream | null>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const sessionStartTime = useRef<number>(0);
-  const lastSpokenIdRef = useRef<string>("");
   const voiceModeRef = useRef<boolean>(false);
   const isMutedRef = useRef<boolean>(false);
   const isStreamingRef = useRef<boolean>(false);
@@ -112,6 +111,11 @@ export default function Companion() {
   const audioElRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
   const ttsAbortRef = useRef<AbortController | null>(null);
+  // Sentence-chunked speech queue — lets us start speaking the first sentence
+  // as soon as it streams in, instead of waiting for the whole reply.
+  const speechQueueRef = useRef<string[]>([]);
+  const queueRunningRef = useRef(false);
+  const spokenUpToRef = useRef(0);
 
   // Sync refs with state for use inside callbacks/event handlers
   useEffect(() => { voiceModeRef.current = voiceMode; }, [voiceMode]);
@@ -159,15 +163,10 @@ export default function Companion() {
     };
   }, []);
 
-  // Auto-speak last assistant message
-  useEffect(() => {
-    if (isMuted || isStreaming) return;
-    const last = messages[messages.length - 1];
-    if (last && last.role === "assistant" && last.content && last.id !== lastSpokenIdRef.current) {
-      lastSpokenIdRef.current = last.id;
-      speakText(last.content);
-    }
-  }, [messages, isStreaming, isMuted]);
+  // Note: speech is now enqueued sentence-by-sentence as the assistant's
+  // reply streams in (see sendMessage), so there's no separate "speak the
+  // full message after streaming ends" effect anymore — that was the
+  // source of the noticeable delay before audio started.
 
   // ============================================================
   // SPEECH SYNTHESIS — Standard English Female (US/UK)
@@ -188,81 +187,105 @@ export default function Companion() {
       URL.revokeObjectURL(audioUrlRef.current);
       audioUrlRef.current = null;
     }
+    speechQueueRef.current = [];
+    queueRunningRef.current = false;
     setIsSpeaking(false);
   }, []);
 
-  const speakText = useCallback(async (text: string) => {
-    // Stop anything currently speaking first
-    stopAllSpeech();
-    const clean = text.replace(/[*_#`>]/g, "").replace(/\([^)]*\)/g, "").replace(/\n{2,}/g, ". ").trim();
-    if (!clean) return;
+  // Plays a single chunk of text and resolves once playback (or fallback) ends.
+  const playChunk = useCallback((text: string): Promise<void> => {
+    return new Promise(async (resolve) => {
+      const clean = text.replace(/[*_#`>]/g, "").replace(/\([^)]*\)/g, "").replace(/\n{2,}/g, ". ").trim();
+      if (!clean) return resolve();
 
-    const lang = languageRef.current;
-    setActiveVoiceName(lang === "hindi" ? "Indian Hindi voice" : lang === "hinglish" ? "Indian Hinglish voice" : "Indian English voice");
+      const lang = languageRef.current;
+      setActiveVoiceName(lang === "hindi" ? "Indian Hindi voice" : lang === "hinglish" ? "Indian Hinglish voice" : "Indian English voice");
 
-    // Show speaking state immediately while audio is being generated
-    setIsSpeaking(true);
+      const ctrl = new AbortController();
+      ttsAbortRef.current = ctrl;
 
-    const ctrl = new AbortController();
-    ttsAbortRef.current = ctrl;
+      try {
+        const res = await fetch("/api/companion/speak", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: clean, language: lang, mode }),
+          signal: ctrl.signal,
+        });
+        if (!res.ok) throw new Error(`TTS HTTP ${res.status}`);
+        const blob = await res.blob();
+        if (ctrl.signal.aborted) return resolve();
 
-    try {
-      const res = await fetch("/api/companion/speak", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: clean, language: lang, mode }),
-        signal: ctrl.signal,
-      });
-      if (!res.ok) throw new Error(`TTS HTTP ${res.status}`);
-      const blob = await res.blob();
-      // If we were aborted while waiting, bail
-      if (ctrl.signal.aborted) return;
+        const url = URL.createObjectURL(blob);
+        audioUrlRef.current = url;
 
-      const url = URL.createObjectURL(blob);
-      audioUrlRef.current = url;
-
-      // Reuse a single audio element across utterances
-      if (!audioElRef.current) {
-        audioElRef.current = new Audio();
-      }
-      const audio = audioElRef.current;
-      audio.src = url;
-      audio.onplay = () => setIsSpeaking(true);
-      audio.onended = () => {
-        setIsSpeaking(false);
-        if (audioUrlRef.current) {
-          URL.revokeObjectURL(audioUrlRef.current);
-          audioUrlRef.current = null;
+        if (!audioElRef.current) {
+          audioElRef.current = new Audio();
         }
-        autoListenAfterSpeakRef.current?.();
-      };
-      audio.onerror = () => {
-        console.warn("[CommSkills] Audio playback error");
-        setIsSpeaking(false);
-      };
-      try {
-        await audio.play();
-      } catch (playErr) {
-        console.warn("[CommSkills] audio.play() rejected:", playErr);
-        setIsSpeaking(false);
+        const audio = audioElRef.current;
+        audio.src = url;
+        audio.onplay = () => setIsSpeaking(true);
+        audio.onended = () => {
+          if (audioUrlRef.current) {
+            URL.revokeObjectURL(audioUrlRef.current);
+            audioUrlRef.current = null;
+          }
+          resolve();
+        };
+        audio.onerror = () => {
+          console.warn("[CommSkills] Audio playback error");
+          resolve();
+        };
+        try {
+          await audio.play();
+        } catch (playErr) {
+          console.warn("[CommSkills] audio.play() rejected:", playErr);
+          resolve();
+        }
+      } catch (err: any) {
+        if (err?.name === "AbortError") return resolve();
+        console.warn("[CommSkills] Server TTS failed, falling back to browser:", err?.message || err);
+        try {
+          const u = new SpeechSynthesisUtterance(clean);
+          u.lang = lang === "hindi" ? "hi-IN" : "en-IN";
+          u.rate = mode === "interview" ? 0.95 : 1.05;
+          u.pitch = 1.1;
+          u.onend = () => resolve();
+          u.onerror = () => resolve();
+          window.speechSynthesis.speak(u);
+        } catch {
+          resolve();
+        }
       }
-    } catch (err: any) {
-      if (err?.name === "AbortError") return;
-      console.warn("[CommSkills] Server TTS failed, falling back to browser:", err?.message || err);
-      // Last-resort fallback to browser TTS so the user still hears something
-      try {
-        const u = new SpeechSynthesisUtterance(clean);
-        u.lang = lang === "hindi" ? "hi-IN" : "en-IN";
-        u.rate = mode === "interview" ? 0.95 : 1.05;
-        u.pitch = 1.1;
-        u.onend = () => { setIsSpeaking(false); autoListenAfterSpeakRef.current?.(); };
-        u.onerror = () => setIsSpeaking(false);
-        window.speechSynthesis.speak(u);
-      } catch {
-        setIsSpeaking(false);
-      }
+    });
+  }, [mode]);
+
+  // Drains the speech queue in order — plays chunk 1 while chunk 2/3 may
+  // still be arriving from the stream, so audio starts as early as possible.
+  const runSpeechQueue = useCallback(async () => {
+    if (queueRunningRef.current) return;
+    queueRunningRef.current = true;
+    setIsSpeaking(true);
+    while (speechQueueRef.current.length > 0) {
+      const next = speechQueueRef.current.shift()!;
+      await playChunk(next);
     }
-  }, [mode, stopAllSpeech]);
+    queueRunningRef.current = false;
+    setIsSpeaking(false);
+    autoListenAfterSpeakRef.current?.();
+  }, [playChunk]);
+
+  const enqueueChunk = useCallback((text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    speechQueueRef.current.push(trimmed);
+    runSpeechQueue();
+  }, [runSpeechQueue]);
+
+  // Kept for the (rare) case a full message needs to be spoken in one shot.
+  const speakText = useCallback((text: string) => {
+    stopAllSpeech();
+    enqueueChunk(text);
+  }, [stopAllSpeech, enqueueChunk]);
 
   // Ref to call the latest auto-listen handler from speakText.onend
   const autoListenAfterSpeakRef = useRef<(() => void) | null>(null);
@@ -443,6 +466,33 @@ export default function Companion() {
     setInput("");
     setIsStreaming(true);
 
+    // Reset sentence-chunk cursor for this new reply
+    let fullText = "";
+    spokenUpToRef.current = 0;
+
+    // Scans any newly-arrived text for complete sentences and queues them
+    // for speech immediately, instead of waiting for the whole reply.
+    const flushSpeakableSentences = (finalFlush = false) => {
+      if (isMutedRef.current) return;
+      const unspoken = fullText.slice(spokenUpToRef.current);
+      if (finalFlush) {
+        if (unspoken.trim()) {
+          enqueueChunk(unspoken);
+          spokenUpToRef.current = fullText.length;
+        }
+        return;
+      }
+      const sentenceRe = /[^.!?\n]+[.!?\n]+/g;
+      let match: RegExpExecArray | null;
+      let lastEnd = 0;
+      while ((match = sentenceRe.exec(unspoken)) !== null) {
+        const sentence = match[0];
+        if (sentence.trim()) enqueueChunk(sentence);
+        lastEnd = match.index + sentence.length;
+      }
+      if (lastEnd > 0) spokenUpToRef.current += lastEnd;
+    };
+
     try {
       const history = messages.map(m => ({ role: m.role, content: m.content }));
       const res = await fetch("/api/companion/respond", {
@@ -474,9 +524,11 @@ export default function Companion() {
               done = true; break;
             }
             if (data.content) {
+              fullText += data.content;
               setMessages(prev => prev.map(m => m.id === botId ? { ...m, content: m.content + data.content } : m));
+              flushSpeakableSentences();
             }
-            if (data.done) { done = true; break; }
+            if (data.done) { flushSpeakableSentences(true); done = true; break; }
           } catch {}
         }
       }
@@ -506,11 +558,12 @@ export default function Companion() {
     sessionStartTime.current = Date.now();
     setShowFeedback(false);
     setFeedback(null);
+    if (!isMutedRef.current) speakText(welcome);
     // Auto-start camera (best effort) so user sees themselves immediately
     if (!cameraOn) {
       startCamera().catch(() => {});
     }
-  }, [mode, language, cameraOn, startCamera]);
+  }, [mode, language, cameraOn, startCamera, speakText]);
 
   const switchMode = useCallback((newMode: Mode) => {
     if (newMode === mode) return;

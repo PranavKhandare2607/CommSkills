@@ -99,6 +99,12 @@ export default function Companion() {
   const [callStatus, setCallStatus] = useState<"ringing" | "connected">("ringing");
   const [callSeconds, setCallSeconds] = useState(0);
   const callTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // iOS Safari / most mobile browsers don't implement SpeechRecognition at all —
+  // detect once so we can show a working fallback instead of a dead mic button.
+  const [speechRecognitionSupported] = useState<boolean>(
+    () => typeof window !== "undefined" && !!((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)
+  );
+  const [callInput, setCallInput] = useState("");
 
   const recognitionRef = useRef<any>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -194,6 +200,34 @@ export default function Companion() {
     speechQueueRef.current = [];
     queueRunningRef.current = false;
     setIsSpeaking(false);
+  }, []);
+
+  // Mobile browsers (especially iOS Safari) only allow audio.play() when it's
+  // triggered synchronously by a user gesture. Our TTS playback happens after
+  // an async fetch(), which breaks that chain and gets silently blocked.
+  // The fix: "unlock" the shared <audio> element with a real (silent) play/pause
+  // cycle directly inside the click handler — after that, later programmatic
+  // play() calls on the same element are allowed even from async code.
+  const SILENT_WAV = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
+  const unlockAudioPlayback = useCallback(() => {
+    try {
+      if (!audioElRef.current) audioElRef.current = new Audio();
+      const audio = audioElRef.current;
+      const prevSrc = audio.src;
+      audio.muted = true;
+      audio.src = SILENT_WAV;
+      const p = audio.play();
+      if (p && typeof p.then === "function") {
+        p.then(() => {
+          audio.pause();
+          audio.currentTime = 0;
+          audio.muted = false;
+          if (prevSrc) audio.src = prevSrc;
+        }).catch(() => { audio.muted = false; });
+      }
+    } catch {}
+    // Also nudge SpeechSynthesis awake on some Android browsers.
+    try { window.speechSynthesis.resume(); } catch {}
   }, []);
 
   // Plays a single chunk of text and resolves once playback (or fallback) ends.
@@ -556,6 +590,7 @@ export default function Companion() {
   // SESSION MANAGEMENT
   // ============================================================
   const startSession = useCallback(() => {
+    unlockAudioPlayback();
     const welcome = WELCOME_MSGS[mode][language];
     setMessages([{ id: "welcome", role: "assistant", content: welcome }]);
     setSessionStarted(true);
@@ -567,19 +602,24 @@ export default function Companion() {
     if (!cameraOn) {
       startCamera().catch(() => {});
     }
-  }, [mode, language, cameraOn, startCamera, speakText]);
+  }, [mode, language, cameraOn, startCamera, speakText, unlockAudioPlayback]);
 
   // ============================================================
   // "CALL" — in-app, phone-call-style voice conversation
   // (no real phone number involved — this rings & connects inside the browser)
   // ============================================================
   const startCall = useCallback(() => {
+    // Must run synchronously inside the click handler (before any async work)
+    // so mobile browsers treat subsequent audio playback as user-initiated.
+    unlockAudioPlayback();
     stopAllSpeech();
     setIsCallActive(true);
     setCallStatus("ringing");
     setCallSeconds(0);
     setVoiceMode(true);
     setIsMuted(false);
+    setCallInput("");
+    try { document.body.style.overflow = "hidden"; } catch {}
     if (!sessionStarted) {
       startSession();
     }
@@ -588,12 +628,12 @@ export default function Companion() {
       setCallStatus("connected");
       if (callTimerRef.current) clearInterval(callTimerRef.current);
       callTimerRef.current = setInterval(() => setCallSeconds(s => s + 1), 1000);
-      if (sessionStarted) {
+      if (sessionStarted && speechRecognitionSupported) {
         // Session already running (e.g. resumed) — jump straight into listening.
         setTimeout(() => startListeningRef.current?.(), 300);
       }
     }, 1600);
-  }, [sessionStarted, startSession, stopAllSpeech]);
+  }, [sessionStarted, startSession, stopAllSpeech, unlockAudioPlayback, speechRecognitionSupported]);
 
   const endCall = useCallback(() => {
     stopAllSpeech();
@@ -601,8 +641,21 @@ export default function Companion() {
     setIsCallActive(false);
     setCallStatus("ringing");
     setCallSeconds(0);
+    try { document.body.style.overflow = ""; } catch {}
     if (callTimerRef.current) { clearInterval(callTimerRef.current); callTimerRef.current = null; }
   }, [stopAllSpeech, stopListening]);
+
+  // Safety net: always restore body scroll if the component unmounts mid-call.
+  useEffect(() => {
+    return () => { try { document.body.style.overflow = ""; } catch {} };
+  }, []);
+
+  const sendCallText = useCallback(() => {
+    const txt = callInput.trim();
+    if (!txt || isStreaming) return;
+    setCallInput("");
+    sendMessageRef.current?.(txt);
+  }, [callInput, isStreaming]);
 
   useEffect(() => () => { if (callTimerRef.current) clearInterval(callTimerRef.current); }, []);
 
@@ -1263,14 +1316,17 @@ export default function Companion() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               className={cn(
-                "fixed inset-0 z-[100] flex flex-col items-center justify-between text-white p-6 sm:p-10",
+                "fixed inset-0 z-[100] flex flex-col items-center justify-between text-white overflow-hidden",
+                "h-[100dvh] px-4 sm:px-10",
+                "pt-[max(1.5rem,env(safe-area-inset-top))] pb-[max(1.25rem,env(safe-area-inset-bottom))]",
                 mode === "interview"
                   ? "bg-gradient-to-br from-indigo-950 via-indigo-900 to-blue-950"
                   : "bg-gradient-to-br from-rose-950 via-rose-900 to-pink-950"
               )}
+              style={{ touchAction: "manipulation" }}
             >
               {/* Top: status */}
-              <div className="text-center mt-6">
+              <div className="text-center mt-2 sm:mt-6 shrink-0">
                 <p className="text-sm font-medium text-white/60 uppercase tracking-wide">
                   {callStatus === "ringing" ? "Calling..." : "In-app voice call"}
                 </p>
@@ -1283,12 +1339,12 @@ export default function Companion() {
               </div>
 
               {/* Middle: avatar */}
-              <div className="flex flex-col items-center">
+              <div className="flex flex-col items-center min-h-0 flex-1 justify-center">
                 <motion.div
                   animate={callStatus === "ringing" ? { scale: [1, 1.06, 1] } : { scale: 1 }}
                   transition={callStatus === "ringing" ? { duration: 1.1, repeat: Infinity } : {}}
                   className={cn(
-                    "w-52 h-52 sm:w-64 sm:h-64 rounded-full p-1.5",
+                    "w-40 h-40 sm:w-64 sm:h-64 rounded-full p-1.5 max-h-[38vh]",
                     isSpeaking
                       ? "bg-gradient-to-br from-emerald-400 to-emerald-600 animate-pulse"
                       : isListening
@@ -1305,25 +1361,49 @@ export default function Companion() {
                     />
                   </div>
                 </motion.div>
-                <div className="mt-5 text-sm font-medium">
+                <div className="mt-4 text-sm font-medium text-center px-4">
                   {callStatus === "ringing" ? (
                     <span className="text-white/70">Ringing...</span>
                   ) : isSpeaking ? (
-                    <span className="text-emerald-300 flex items-center gap-1.5"><Volume2 className="w-4 h-4" /> Speaking...</span>
+                    <span className="text-emerald-300 flex items-center gap-1.5 justify-center"><Volume2 className="w-4 h-4" /> Speaking...</span>
                   ) : isListening ? (
-                    <span className="text-rose-300 flex items-center gap-1.5 animate-pulse"><Mic className="w-4 h-4" /> Listening...</span>
-                  ) : (
+                    <span className="text-rose-300 flex items-center gap-1.5 justify-center animate-pulse"><Mic className="w-4 h-4" /> Listening...</span>
+                  ) : speechRecognitionSupported ? (
                     <span className="text-white/60">Go ahead, say something</span>
+                  ) : (
+                    <span className="text-white/60">Voice typing isn't supported on this browser — type below instead</span>
                   )}
                 </div>
               </div>
 
+              {/* Text fallback — shown when the browser can't do speech-to-text
+                  (e.g. iOS Safari), so the call still works via typing. */}
+              {!speechRecognitionSupported && callStatus === "connected" && (
+                <div className="w-full max-w-md flex items-center gap-2 mb-3 shrink-0">
+                  <input
+                    value={callInput}
+                    onChange={(e) => setCallInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); sendCallText(); } }}
+                    placeholder="Type your reply..."
+                    disabled={isStreaming}
+                    className="flex-1 px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/40 text-sm focus:outline-none focus:border-white/40"
+                  />
+                  <button
+                    onClick={sendCallText}
+                    disabled={!callInput.trim() || isStreaming}
+                    className="p-3 rounded-xl bg-white/20 disabled:opacity-40 shrink-0"
+                  >
+                    <Send className="w-5 h-5" />
+                  </button>
+                </div>
+              )}
+
               {/* Bottom: controls */}
-              <div className="flex items-center gap-6 mb-6">
+              <div className="flex items-center gap-5 sm:gap-6 mb-1 shrink-0">
                 <button
                   onClick={() => { setIsMuted(m => !m); if (!isMuted) stopAllSpeech(); }}
                   className={cn(
-                    "w-14 h-14 rounded-full flex items-center justify-center transition-all",
+                    "w-14 h-14 rounded-full flex items-center justify-center transition-all active:scale-95",
                     isMuted ? "bg-white text-slate-900" : "bg-white/15 text-white hover:bg-white/25"
                   )}
                   title={isMuted ? "Unmute" : "Mute her voice"}
@@ -1332,19 +1412,23 @@ export default function Companion() {
                 </button>
                 <button
                   onClick={endCall}
-                  className="w-16 h-16 rounded-full bg-rose-600 hover:bg-rose-700 flex items-center justify-center shadow-xl shadow-rose-900/50 transition-all hover:scale-105"
+                  className="w-16 h-16 rounded-full bg-rose-600 hover:bg-rose-700 flex items-center justify-center shadow-xl shadow-rose-900/50 transition-all active:scale-95"
                   title="End call"
                 >
                   <PhoneOff className="w-7 h-7 text-white" />
                 </button>
                 <button
-                  onClick={isListening ? stopListening : startListening}
-                  disabled={callStatus === "ringing" || isStreaming}
+                  onClick={() => {
+                    if (!speechRecognitionSupported) return;
+                    unlockAudioPlayback();
+                    isListening ? stopListening() : startListening();
+                  }}
+                  disabled={callStatus === "ringing" || isStreaming || !speechRecognitionSupported}
                   className={cn(
-                    "w-14 h-14 rounded-full flex items-center justify-center transition-all disabled:opacity-40",
+                    "w-14 h-14 rounded-full flex items-center justify-center transition-all active:scale-95 disabled:opacity-30",
                     isListening ? "bg-rose-500 text-white animate-pulse" : "bg-white/15 text-white hover:bg-white/25"
                   )}
-                  title={isListening ? "Stop talking" : "Talk now"}
+                  title={!speechRecognitionSupported ? "Voice typing unsupported — use the text box" : isListening ? "Stop talking" : "Talk now"}
                 >
                   {isListening ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
                 </button>

@@ -115,6 +115,7 @@ export function FemaleAvatar({ isSpeaking, isListening, mode, expression = "neut
     } else {
       setBrowLift(0);
     }
+    return undefined;
   }, [isSpeaking, expression]);
 
   // ============ COLORS ============

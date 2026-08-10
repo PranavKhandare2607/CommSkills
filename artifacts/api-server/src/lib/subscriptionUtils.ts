@@ -40,8 +40,16 @@ export async function getOrCreateSubscription(userId: string) {
       trialStartedAt: trialStart,
       trialEndsAt: trialEnd,
     })
+    .onConflictDoNothing({ target: subscriptionsTable.userId })
     .returning();
-  return created;
+  if (created) return created;
+
+  const [existing] = await db
+    .select()
+    .from(subscriptionsTable)
+    .where(eq(subscriptionsTable.userId, userId))
+    .limit(1);
+  return existing;
 }
 
 export async function getSubscriptionStatus(userId: string) {
@@ -63,7 +71,7 @@ export async function getSubscriptionStatus(userId: string) {
 
   return {
     plan: sub.plan,
-    status: isInTrial ? "trial" : sub.status,
+    status: isInTrial ? "trial" : sub.status === "trial" ? "free" : sub.status,
     isPremium,
     isInTrial,
     trialDaysRemaining,
@@ -86,8 +94,18 @@ export async function getTodayUsage(userId: string) {
   const [created] = await db
     .insert(dailyUsageTable)
     .values({ userId, date })
+    .onConflictDoNothing({
+      target: [dailyUsageTable.userId, dailyUsageTable.date],
+    })
     .returning();
-  return created;
+  if (created) return created;
+
+  const [existing] = await db
+    .select()
+    .from(dailyUsageTable)
+    .where(and(eq(dailyUsageTable.userId, userId), eq(dailyUsageTable.date, date)))
+    .limit(1);
+  return existing;
 }
 
 export async function checkAndIncrementUsage(

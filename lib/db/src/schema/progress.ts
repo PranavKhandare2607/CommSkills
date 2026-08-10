@@ -1,17 +1,23 @@
-import { pgTable, text, serial, integer, real, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, real, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
-export const userProgressTable = pgTable("user_progress", {
-  id: serial("id").primaryKey(),
-  userId: text("user_id"),
-  points: integer("points").notNull().default(0),
-  badge: text("badge").notNull().default("Beginner"),
-  grammarAccuracy: real("grammar_accuracy").notNull().default(0),
-  vocabularyLearned: integer("vocabulary_learned").notNull().default(0),
-  speakingAttempts: integer("speaking_attempts").notNull().default(0),
-  updatedAt: timestamp("updated_at").defaultNow(),
-});
+export const userProgressTable = pgTable(
+  "user_progress",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id"),
+    points: integer("points").notNull().default(0),
+    badge: text("badge").notNull().default("Beginner"),
+    grammarAccuracy: real("grammar_accuracy").notNull().default(0),
+    vocabularyLearned: integer("vocabulary_learned").notNull().default(0),
+    speakingAttempts: integer("speaking_attempts").notNull().default(0),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => ({
+    userProgressUserIdUnique: uniqueIndex("user_progress_user_id_unique").on(table.userId),
+  }),
+);
 
 export const activityLogTable = pgTable("activity_log", {
   id: serial("id").primaryKey(),

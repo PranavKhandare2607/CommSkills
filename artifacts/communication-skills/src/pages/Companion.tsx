@@ -538,7 +538,14 @@ export default function Companion() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode, history, message: trimmed, language }),
       });
-      if (!res.ok || !res.body) throw new Error("Stream failed");
+      if (res.status === 402) {
+        setMessages(prev => prev.map(m => m.id === botId
+          ? { ...m, content: "AI Companion access is currently locked because your Premium trial has ended. Open Pricing to renew access, then try the interview again." }
+          : m
+        ));
+        return;
+      }
+      if (!res.ok || !res.body) throw new Error(`Stream failed (${res.status})`);
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();

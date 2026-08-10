@@ -24,8 +24,16 @@ async function getOrCreateProgress(userId: string) {
   const [created] = await db
     .insert(userProgressTable)
     .values({ userId })
+    .onConflictDoNothing({ target: userProgressTable.userId })
     .returning();
-  return created;
+  if (created) return created;
+
+  const [existing] = await db
+    .select()
+    .from(userProgressTable)
+    .where(eq(userProgressTable.userId, userId))
+    .limit(1);
+  return existing;
 }
 
 // GET /progress

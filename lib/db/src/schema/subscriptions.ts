@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -17,16 +17,22 @@ export const subscriptionsTable = pgTable("subscriptions", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
-export const dailyUsageTable = pgTable("daily_usage", {
-  id: serial("id").primaryKey(),
-  userId: text("user_id").notNull(),
-  date: text("date").notNull(),
-  grammarChecks: integer("grammar_checks").notNull().default(0),
-  vocabularyLookups: integer("vocabulary_lookups").notNull().default(0),
-  aiMessages: integer("ai_messages").notNull().default(0),
-  speakingAttempts: integer("speaking_attempts").notNull().default(0),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+export const dailyUsageTable = pgTable(
+  "daily_usage",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    date: text("date").notNull(),
+    grammarChecks: integer("grammar_checks").notNull().default(0),
+    vocabularyLookups: integer("vocabulary_lookups").notNull().default(0),
+    aiMessages: integer("ai_messages").notNull().default(0),
+    speakingAttempts: integer("speaking_attempts").notNull().default(0),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    dailyUsageUserDateUnique: uniqueIndex("daily_usage_user_date_unique").on(table.userId, table.date),
+  }),
+);
 
 export const insertSubscriptionSchema = createInsertSchema(subscriptionsTable).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertDailyUsageSchema = createInsertSchema(dailyUsageTable).omit({ id: true, createdAt: true });

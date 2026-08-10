@@ -154,6 +154,7 @@ router.post("/companion/respond", requireAuth, async (req, res) => {
       res.write(`data: ${JSON.stringify({ error: "Failed to respond" })}\n\n`);
       res.end();
     }
+    return;
   }
 });
 
@@ -222,6 +223,7 @@ router.post("/companion/speak", requireAuth, async (req, res) => {
     if (!res.headersSent) {
       res.status(500).json({ error: err?.message || "TTS failed" });
     }
+    return;
   }
 });
 
@@ -282,6 +284,7 @@ Return ONLY valid JSON in this EXACT shape:
     console.error("Feedback error:", err);
     res.status(500).json({ error: err.message || "Feedback error" });
   }
+  return;
 });
 
 export default router;

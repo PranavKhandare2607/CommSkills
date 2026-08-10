@@ -42,7 +42,7 @@ async function enforceSingleSession(userId: string, sessionId: string) {
 
   if (activeSessionId !== sessionId) {
     try {
-      await (await clerkClient()).sessions.revokeSession(activeSessionId);
+      await clerkClient.sessions.revokeSession(activeSessionId);
     } catch {
     }
     await db

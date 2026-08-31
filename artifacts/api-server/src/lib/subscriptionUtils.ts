@@ -1,6 +1,7 @@
 import { db } from "@workspace/db";
 import { subscriptionsTable, dailyUsageTable } from "@workspace/db/schema";
 import { eq, and } from "drizzle-orm";
+import { DEVELOPMENT_GUEST_USER_ID } from "../middlewares/requireAuth";
 
 export const TRIAL_DAYS = 10;
 
@@ -10,6 +11,9 @@ export const FREE_LIMITS = {
   aiMessages: 10,
   speaking: 2,
 } as const;
+
+const DEVELOPMENT_GUEST_TRIAL_DAYS = 10;
+const developmentGuestTrialStartedAt = new Date();
 
 export type UsageType = "grammar" | "vocabulary" | "aiMessages" | "speaking";
 export type LockedFeature = "companion" | "analyzer";
@@ -53,6 +57,21 @@ export async function getOrCreateSubscription(userId: string) {
 }
 
 export async function getSubscriptionStatus(userId: string) {
+  if (process.env.NODE_ENV === "development" && userId === DEVELOPMENT_GUEST_USER_ID) {
+    const trialEndsAt = new Date(developmentGuestTrialStartedAt);
+    trialEndsAt.setDate(trialEndsAt.getDate() + DEVELOPMENT_GUEST_TRIAL_DAYS);
+    return {
+      plan: "free",
+      status: "trial",
+      isPremium: true,
+      isInTrial: true,
+      trialDaysRemaining: DEVELOPMENT_GUEST_TRIAL_DAYS,
+      trialEndsAt: trialEndsAt.toISOString(),
+      stripeCustomerId: null,
+      stripeSubscriptionId: null,
+    };
+  }
+
   const sub = await getOrCreateSubscription(userId);
   const now = new Date();
   const trialEndsAt = new Date(sub.trialEndsAt);

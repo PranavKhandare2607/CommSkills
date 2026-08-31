@@ -24,6 +24,8 @@ import { useGetProgress } from "@workspace/api-client-react";
 import { useSubscription } from "@/hooks/useSubscription";
 import { TrialBanner } from "@/components/TrialBanner";
 
+const developmentGuestMode = import.meta.env.DEV;
+
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/ai-coach", label: "AI Coach", icon: Bot, isPrimary: true },
@@ -162,6 +164,12 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
       {/* Mobile Header */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {developmentGuestMode && (
+          <div className="shrink-0 bg-amber-100 border-b border-amber-200 px-4 py-2 text-center text-xs font-medium text-amber-900">
+            Development guest mode — you can test Premium features without signing in. This access is only available in development.
+          </div>
+        )}
+
         <header className="md:hidden flex items-center justify-between p-4 bg-indigo-950 border-b border-indigo-900 z-20 text-white shadow-md">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-indigo-500 flex items-center justify-center">

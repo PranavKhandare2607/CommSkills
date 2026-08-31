@@ -42,6 +42,7 @@ const clerkPubKey = publishableKeyFromHost(
 const clerkProxyUrl = import.meta.env.VITE_CLERK_PROXY_URL;
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
+const developmentGuestMode = import.meta.env.DEV;
 
 function stripBase(path: string): string {
   return basePath && path.startsWith(basePath)
@@ -124,6 +125,10 @@ function ClerkQueryClientCacheInvalidator() {
 }
 
 function HomeRedirect() {
+  if (developmentGuestMode) {
+    return <Redirect to="/dashboard" />;
+  }
+
   return (
     <>
       <Show when="signed-in">
@@ -137,6 +142,14 @@ function HomeRedirect() {
 }
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
+  if (developmentGuestMode) {
+    return (
+      <AppLayout>
+        <Component />
+      </AppLayout>
+    );
+  }
+
   return (
     <>
       <Show when="signed-in">

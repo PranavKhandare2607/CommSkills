@@ -4,11 +4,20 @@ import { db } from "@workspace/db";
 import { subscriptionsTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
 
+export const DEVELOPMENT_GUEST_USER_ID = "development_guest";
+
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
   const auth = getAuth(req);
   const userId = auth?.userId;
   const sessionId = auth?.sessionId;
   if (!userId || !sessionId) {
+    // Development-only guest access. NODE_ENV is set by the dev workflow and
+    // is never enabled for the published server.
+    if (process.env.NODE_ENV === "development") {
+      (req as Request & { userId: string }).userId = DEVELOPMENT_GUEST_USER_ID;
+      next();
+      return;
+    }
     res.status(401).json({ error: "Unauthorized" });
     return;
   }

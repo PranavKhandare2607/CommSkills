@@ -137,6 +137,9 @@ router.post("/companion/respond", requireAuth, async (req, res) => {
       stream: true,
     });
 
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders?.();
+
     for await (const chunk of stream) {
       const content = chunk.choices[0]?.delta?.content;
       if (content) {
@@ -227,7 +230,7 @@ router.post("/companion/speak", requireAuth, async (req, res) => {
   }
 });
 
-router.post("/companion/feedback", async (req, res) => {
+router.post("/companion/feedback", requireAuth, async (req, res) => {
   try {
     const { mode, transcript, observations } = req.body || {};
     if (mode !== "interview" && mode !== "friend") {

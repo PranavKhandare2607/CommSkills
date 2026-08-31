@@ -95,6 +95,7 @@ export default function Companion() {
   const languageRef = useRef<"english" | "hindi" | "hinglish">("english");
   useEffect(() => { languageRef.current = language; }, [language]);
   const [activeVoiceName, setActiveVoiceName] = useState<string>("");
+  const [voiceError, setVoiceError] = useState<string | null>(null);
   const [isCallActive, setIsCallActive] = useState(false);
   const [callStatus, setCallStatus] = useState<"ringing" | "connected">("ringing");
   const [callSeconds, setCallSeconds] = useState(0);
@@ -121,6 +122,8 @@ export default function Companion() {
   const audioElRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
   const ttsAbortRef = useRef<AbortController | null>(null);
+  const audioResolveRef = useRef<(() => void) | null>(null);
+  const speechGenerationRef = useRef(0);
   // Sentence-chunked speech queue — lets us start speaking the first sentence
   // as soon as it streams in, instead of waiting for the whole reply.
   const speechQueueRef = useRef<string[]>([]);
@@ -142,15 +145,6 @@ export default function Companion() {
     try { setInIframe(window.self !== window.top); } catch { setInIframe(true); }
   }, []);
 
-  // Preload browser voices (only used as a last-resort fallback if server TTS fails)
-  useEffect(() => {
-    try {
-      window.speechSynthesis.getVoices();
-      window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
-    } catch {}
-    return () => { try { window.speechSynthesis.onvoiceschanged = null; } catch {} };
-  }, []);
-
   // Auto scroll
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -159,8 +153,9 @@ export default function Companion() {
   // Cleanup
   useEffect(() => {
     return () => {
-      try { window.speechSynthesis.cancel(); } catch {}
       ttsAbortRef.current?.abort();
+      audioResolveRef.current?.();
+      audioResolveRef.current = null;
       if (audioElRef.current) {
         try { audioElRef.current.pause(); } catch {}
       }
@@ -181,14 +176,19 @@ export default function Companion() {
   // ============================================================
   // SPEECH SYNTHESIS — Standard English Female (US/UK)
   // ============================================================
-  // Cleanly stop any ongoing speech (both server audio and any browser TTS leftovers)
+  // Cleanly stop any ongoing server-generated speech.
   const stopAllSpeech = useCallback(() => {
-    try { window.speechSynthesis.cancel(); } catch {}
+    speechGenerationRef.current += 1;
     ttsAbortRef.current?.abort();
     ttsAbortRef.current = null;
+    audioResolveRef.current?.();
+    audioResolveRef.current = null;
     if (audioElRef.current) {
       try {
         audioElRef.current.pause();
+        audioElRef.current.onplay = null;
+        audioElRef.current.onended = null;
+        audioElRef.current.onerror = null;
         audioElRef.current.removeAttribute("src");
         audioElRef.current.load();
       } catch {}
@@ -226,74 +226,89 @@ export default function Companion() {
         }).catch(() => { audio.muted = false; });
       }
     } catch {}
-    // Also nudge SpeechSynthesis awake on some Android browsers.
-    try { window.speechSynthesis.resume(); } catch {}
   }, []);
 
   // Plays a single chunk of text and resolves once playback (or fallback) ends.
-  const playChunk = useCallback((text: string): Promise<void> => {
-    return new Promise(async (resolve) => {
+  const playChunk = useCallback((text: string, generation: number): Promise<void> => {
+    return new Promise((resolve) => {
       const clean = text.replace(/[*_#`>]/g, "").replace(/\([^)]*\)/g, "").replace(/\n{2,}/g, ". ").trim();
-      if (!clean) return resolve();
+      if (!clean || generation !== speechGenerationRef.current) {
+        resolve();
+        return;
+      }
 
       const lang = languageRef.current;
       setActiveVoiceName(lang === "hindi" ? "Indian Hindi voice" : lang === "hinglish" ? "Indian Hinglish voice" : "Indian English voice");
+      setVoiceError(null);
 
-      const ctrl = new AbortController();
-      ttsAbortRef.current = ctrl;
-
-      try {
-        const res = await fetch("/api/companion/speak", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: clean, language: lang, mode }),
-          signal: ctrl.signal,
-        });
-        if (!res.ok) throw new Error(`TTS HTTP ${res.status}`);
-        const blob = await res.blob();
-        if (ctrl.signal.aborted) return resolve();
-
-        const url = URL.createObjectURL(blob);
-        audioUrlRef.current = url;
-
-        if (!audioElRef.current) {
-          audioElRef.current = new Audio();
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        if (audioResolveRef.current === finish) audioResolveRef.current = null;
+        if (audioUrlRef.current) {
+          URL.revokeObjectURL(audioUrlRef.current);
+          audioUrlRef.current = null;
         }
-        const audio = audioElRef.current;
-        audio.src = url;
-        audio.onplay = () => setIsSpeaking(true);
-        audio.onended = () => {
-          if (audioUrlRef.current) {
-            URL.revokeObjectURL(audioUrlRef.current);
-            audioUrlRef.current = null;
+        resolve();
+      };
+      audioResolveRef.current = finish;
+
+      const run = async () => {
+        const ctrl = new AbortController();
+        ttsAbortRef.current = ctrl;
+        try {
+          const res = await fetch("/api/companion/speak", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: clean, language: lang, mode }),
+            signal: ctrl.signal,
+          });
+          if (!res.ok) {
+            let detail = "";
+            try {
+              const payload = await res.json();
+              detail = typeof payload?.error === "string" ? payload.error : "";
+            } catch {}
+            throw new Error(detail || `TTS HTTP ${res.status}`);
           }
-          resolve();
-        };
-        audio.onerror = () => {
-          console.warn("[CommSkills] Audio playback error");
-          resolve();
-        };
-        try {
-          await audio.play();
-        } catch (playErr) {
-          console.warn("[CommSkills] audio.play() rejected:", playErr);
-          resolve();
+          const blob = await res.blob();
+          if (ctrl.signal.aborted || generation !== speechGenerationRef.current) {
+            finish();
+            return;
+          }
+
+          const url = URL.createObjectURL(blob);
+          audioUrlRef.current = url;
+          if (!audioElRef.current) audioElRef.current = new Audio();
+          const audio = audioElRef.current;
+          audio.src = url;
+          audio.onplay = () => setIsSpeaking(true);
+          audio.onended = finish;
+          audio.onerror = () => {
+            setVoiceError("The AI voice audio could not be played. The text reply is still available.");
+            finish();
+          };
+          try {
+            await audio.play();
+          } catch (playErr) {
+            if (!ctrl.signal.aborted) {
+              console.warn("[CommSkills] audio.play() rejected:", playErr);
+              setVoiceError("Audio playback was blocked by the browser. Open the app in a new tab and allow sound.");
+            }
+            finish();
+          }
+        } catch (err: any) {
+          if (err?.name !== "AbortError" && generation === speechGenerationRef.current) {
+            console.warn("[CommSkills] Server TTS failed:", err?.message || err);
+            setVoiceError("AI voice is temporarily unavailable. The text reply is still available.");
+          }
+          finish();
+        } finally {
+          if (ttsAbortRef.current === ctrl) ttsAbortRef.current = null;
         }
-      } catch (err: any) {
-        if (err?.name === "AbortError") return resolve();
-        console.warn("[CommSkills] Server TTS failed, falling back to browser:", err?.message || err);
-        try {
-          const u = new SpeechSynthesisUtterance(clean);
-          u.lang = lang === "hindi" ? "hi-IN" : "en-IN";
-          u.rate = mode === "interview" ? 0.95 : 1.05;
-          u.pitch = 1.1;
-          u.onend = () => resolve();
-          u.onerror = () => resolve();
-          window.speechSynthesis.speak(u);
-        } catch {
-          resolve();
-        }
-      }
+      };
+      run().catch(() => finish());
     });
   }, [mode]);
 
@@ -301,15 +316,18 @@ export default function Companion() {
   // still be arriving from the stream, so audio starts as early as possible.
   const runSpeechQueue = useCallback(async () => {
     if (queueRunningRef.current) return;
+    const generation = speechGenerationRef.current;
     queueRunningRef.current = true;
     setIsSpeaking(true);
-    while (speechQueueRef.current.length > 0) {
+    while (generation === speechGenerationRef.current && speechQueueRef.current.length > 0) {
       const next = speechQueueRef.current.shift()!;
-      await playChunk(next);
+      await playChunk(next, generation);
     }
-    queueRunningRef.current = false;
-    setIsSpeaking(false);
-    autoListenAfterSpeakRef.current?.();
+    if (generation === speechGenerationRef.current) {
+      queueRunningRef.current = false;
+      setIsSpeaking(false);
+      autoListenAfterSpeakRef.current?.();
+    }
   }, [playChunk]);
 
   const enqueueChunk = useCallback((text: string) => {
@@ -551,6 +569,29 @@ export default function Companion() {
       const decoder = new TextDecoder();
       let buffer = "";
       let done = false;
+      const processSseLine = (line: string) => {
+        const t = line.trim();
+        if (!t.startsWith("data:")) return;
+        const json = t.slice(5).trim();
+        if (!json || json === "[DONE]") return;
+        try {
+          const data = JSON.parse(json);
+          if (data.error) {
+            setMessages(prev => prev.map(m => m.id === botId ? { ...m, content: `⚠️ ${data.error}` } : m));
+            done = true;
+            return;
+          }
+          if (data.content) {
+            fullText += data.content;
+            setMessages(prev => prev.map(m => m.id === botId ? { ...m, content: m.content + data.content } : m));
+            flushSpeakableSentences();
+          }
+          if (data.done) {
+            flushSpeakableSentences(true);
+            done = true;
+          }
+        } catch {}
+      };
       while (!done) {
         const { value, done: rd } = await reader.read();
         if (rd) break;
@@ -558,24 +599,13 @@ export default function Companion() {
         const lines = buffer.split("\n");
         buffer = lines.pop() ?? "";
         for (const line of lines) {
-          const t = line.trim();
-          if (!t.startsWith("data:")) continue;
-          const json = t.slice(5).trim();
-          if (!json || json === "[DONE]") continue;
-          try {
-            const data = JSON.parse(json);
-            if (data.error) {
-              setMessages(prev => prev.map(m => m.id === botId ? { ...m, content: `⚠️ ${data.error}` } : m));
-              done = true; break;
-            }
-            if (data.content) {
-              fullText += data.content;
-              setMessages(prev => prev.map(m => m.id === botId ? { ...m, content: m.content + data.content } : m));
-              flushSpeakableSentences();
-            }
-            if (data.done) { flushSpeakableSentences(true); done = true; break; }
-          } catch {}
+          processSseLine(line);
+          if (done) break;
         }
+      }
+      if (buffer.trim() && !done) processSseLine(buffer);
+      if (!done) {
+        flushSpeakableSentences(true);
       }
     } catch (err: any) {
       console.error("Companion stream error:", err);
@@ -583,7 +613,7 @@ export default function Companion() {
     } finally {
       setIsStreaming(false);
     }
-  }, [messages, mode, language, isStreaming, sessionStarted]);
+  }, [messages, mode, language, isStreaming, sessionStarted, enqueueChunk, stopAllSpeech]);
 
   const handleSend = () => {
     if (input.trim()) sendMessage(input.trim());
@@ -1383,9 +1413,9 @@ export default function Companion() {
                 </div>
               </div>
 
-              {/* Text fallback — shown when the browser can't do speech-to-text
-                  (e.g. iOS Safari), so the call still works via typing. */}
-              {!speechRecognitionSupported && callStatus === "connected" && (
+              {/* Text fallback is always available, including browsers where
+                  speech recognition exists but is blocked by permissions or network policy. */}
+              {callStatus === "connected" && (
                 <div className="w-full max-w-md flex items-center gap-2 mb-3 shrink-0">
                   <input
                     value={callInput}

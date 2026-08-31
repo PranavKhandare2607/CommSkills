@@ -7,17 +7,20 @@ import { eq } from "drizzle-orm";
 export const DEVELOPMENT_GUEST_USER_ID = "development_guest";
 
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
+  // Development guest mode intentionally takes precedence over any stale
+  // Clerk cookie, so an expired development subscription cannot block testing.
+  // This branch is only active in the API dev workflow; published servers use
+  // the authenticated path below.
+  if (process.env.NODE_ENV === "development") {
+    (req as Request & { userId: string }).userId = DEVELOPMENT_GUEST_USER_ID;
+    next();
+    return;
+  }
+
   const auth = getAuth(req);
   const userId = auth?.userId;
   const sessionId = auth?.sessionId;
   if (!userId || !sessionId) {
-    // Development-only guest access. NODE_ENV is set by the dev workflow and
-    // is never enabled for the published server.
-    if (process.env.NODE_ENV === "development") {
-      (req as Request & { userId: string }).userId = DEVELOPMENT_GUEST_USER_ID;
-      next();
-      return;
-    }
     res.status(401).json({ error: "Unauthorized" });
     return;
   }

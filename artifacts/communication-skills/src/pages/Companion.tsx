@@ -106,6 +106,7 @@ export default function Companion() {
     () => typeof window !== "undefined" && !!((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)
   );
   const [callInput, setCallInput] = useState("");
+  const sessionStartedRef = useRef(false);
 
   const recognitionRef = useRef<any>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -135,6 +136,7 @@ export default function Companion() {
   useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
   useEffect(() => { isStreamingRef.current = isStreaming; }, [isStreaming]);
   useEffect(() => { isListeningRef.current = isListening; }, [isListening]);
+  useEffect(() => { sessionStartedRef.current = sessionStarted; }, [sessionStarted]);
 
   const queryClient = useQueryClient();
   const { mutate: updateProgress } = useUpdateProgress();
@@ -631,6 +633,7 @@ export default function Companion() {
     const welcome = WELCOME_MSGS[mode][language];
     setMessages([{ id: "welcome", role: "assistant", content: welcome }]);
     setSessionStarted(true);
+    sessionStartedRef.current = true;
     sessionStartTime.current = Date.now();
     setShowFeedback(false);
     setFeedback(null);
@@ -654,10 +657,12 @@ export default function Companion() {
     setCallStatus("ringing");
     setCallSeconds(0);
     setVoiceMode(true);
+    voiceModeRef.current = true;
     setIsMuted(false);
+    isMutedRef.current = false;
     setCallInput("");
     try { document.body.style.overflow = "hidden"; } catch {}
-    if (!sessionStarted) {
+    if (!sessionStartedRef.current) {
       startSession();
     }
     // Brief "ringing" beat for realism, then connect and let her speak first.
@@ -665,12 +670,12 @@ export default function Companion() {
       setCallStatus("connected");
       if (callTimerRef.current) clearInterval(callTimerRef.current);
       callTimerRef.current = setInterval(() => setCallSeconds(s => s + 1), 1000);
-      if (sessionStarted && speechRecognitionSupported) {
+       if (sessionStartedRef.current && speechRecognitionSupported && !isSpeaking) {
         // Session already running (e.g. resumed) — jump straight into listening.
         setTimeout(() => startListeningRef.current?.(), 300);
       }
     }, 1600);
-  }, [sessionStarted, startSession, stopAllSpeech, unlockAudioPlayback, speechRecognitionSupported]);
+  }, [startSession, stopAllSpeech, unlockAudioPlayback, speechRecognitionSupported, isSpeaking]);
 
   const endCall = useCallback(() => {
     stopAllSpeech();
@@ -710,6 +715,7 @@ export default function Companion() {
     setShowFeedback(false);
     setFeedback(null);
     setSessionStarted(false);
+    sessionStartedRef.current = false;
   }, [mode]);
 
   const endSession = useCallback(async () => {
@@ -765,6 +771,7 @@ export default function Companion() {
     setShowFeedback(false);
     setFeedback(null);
     setSessionStarted(false);
+    sessionStartedRef.current = false;
     setInput("");
   }, []);
 
@@ -1220,11 +1227,11 @@ export default function Companion() {
                   </button>
                 </div>
                 <div className="flex items-center justify-between text-xs gap-2 flex-wrap">
-                  <span className="text-slate-500 truncate">
+                  <span className={cn("truncate", voiceError ? "text-amber-700" : "text-slate-500")}>
                     {voiceMode && <>🎙️ Voice mode ON · </>}
                     {language === "hindi" ? "हिंदी" : language === "hinglish" ? "Hinglish" : "English"}
                     {" · "}
-                    {activeVoiceName || "Indian female voice (AI-generated)"}
+                    {voiceError || activeVoiceName || "Indian female voice (AI-generated)"}
                   </span>
                   <button
                     onClick={endSession}

@@ -5,6 +5,18 @@ import { checkLockedFeatureAccess } from "../lib/subscriptionUtils";
 
 const router: IRouter = Router();
 
+const INTERVIEW_QUESTIONS = [
+  "Tell me about yourself.",
+  "What are your strengths?",
+  "What are your weaknesses?",
+  "Why should we hire you?",
+  "Describe a challenge you faced and how you handled it.",
+  "Where do you see yourself in 5 years?",
+  "Why do you want to work with us?",
+  "Tell me about a time you worked in a team.",
+  "Do you have any questions for me?",
+] as const;
+
 const INTERVIEW_PROMPT = `You are Aisha, a warm, professional female interview coach from India who speaks Indian English. You are conducting a realistic mock job interview with the user.
 
 ## Your Role
@@ -14,18 +26,10 @@ const INTERVIEW_PROMPT = `You are Aisha, a warm, professional female interview c
 - Keep responses SHORT (2-4 sentences max) — this is a SPOKEN conversation, not an essay
 
 ## Interview Flow
-1. If this is the first message, greet the user warmly and ask the first question: "Tell me about yourself."
-2. Listen to their answer, acknowledge it briefly with one specific compliment or note (e.g. "Good, I like how you mentioned X.")
-3. Then ask the NEXT question naturally. Rotate through these:
-   - Tell me about yourself
-   - What are your strengths?
-   - What are your weaknesses?
-   - Why should we hire you?
-   - Describe a challenge you faced and how you handled it
-   - Where do you see yourself in 5 years?
-   - Why do you want to work with us?
-   - Tell me about a time you worked in a team
-   - Do you have any questions for me?
+- Listen to the user's answer, acknowledge it briefly with one specific compliment or note (e.g. "Good, I like how you mentioned X.")
+- Give one short, actionable tip in italics.
+- Ask the next question specified in the turn-control instructions below.
+- Never restart the interview or repeat a question that has already been asked.
 
 ## Feedback Style
 - After each answer, give 1 short, actionable tip in italics like *(Tip: try using the STAR method — Situation, Task, Action, Result.)*
@@ -112,13 +116,27 @@ router.post("/companion/respond", requireAuth, async (req, res) => {
     const safeHistory = Array.isArray(history)
       ? history
           .filter((h: any) => h && (h.role === "user" || h.role === "assistant") && typeof h.content === "string")
+          .filter((h: any) => h.content.trim().length > 0 && !h.content.trim().startsWith("⚠️"))
           .map((h: any) => ({ role: h.role as "user" | "assistant", content: h.content }))
       : [];
 
     const langKey = language === "hindi" || language === "hinglish" ? language : "english";
     const langInstruction = LANGUAGE_INSTRUCTIONS[langKey] || LANGUAGE_INSTRUCTIONS.english;
     const basePrompt = mode === "interview" ? INTERVIEW_PROMPT : FRIEND_PROMPT;
-    const systemPrompt = basePrompt + langInstruction;
+    const requestedQuestionIndex = Number.isInteger(req.body?.questionIndex)
+      ? Number(req.body.questionIndex)
+      : safeHistory.filter((h) => h.role === "user").length;
+    const questionIndex = Math.max(0, Math.min(requestedQuestionIndex, INTERVIEW_QUESTIONS.length - 1));
+    const nextQuestion = INTERVIEW_QUESTIONS[questionIndex + 1];
+    const interviewTurnControl = mode === "interview"
+      ? `\n\n## DETERMINISTIC TURN CONTROL
+This user message is the answer to interview question ${questionIndex + 1} of ${INTERVIEW_QUESTIONS.length}: "${INTERVIEW_QUESTIONS[questionIndex]}"
+${nextQuestion
+  ? `After your brief acknowledgement and tip, ask this next question exactly once: "${nextQuestion}"`
+  : "This was the final interview question. Do not ask another interview question; briefly thank the user and invite them to request feedback."}
+Never ask the current question again. Never ask any earlier question again. Do not introduce a different interview question.`
+      : "";
+    const systemPrompt = basePrompt + langInstruction + interviewTurnControl;
 
     const chatMessages = [
       { role: "system" as const, content: systemPrompt },
@@ -131,7 +149,7 @@ router.post("/companion/respond", requireAuth, async (req, res) => {
     res.setHeader("Connection", "keep-alive");
 
     const stream = await openai.chat.completions.create({
-      model: "gpt-5.2",
+      model: "gpt-5-mini",
       max_completion_tokens: 800,
       messages: chatMessages,
       stream: true,
@@ -202,7 +220,7 @@ router.post("/companion/speak", requireAuth, async (req, res) => {
         : `You are ${personaName}, a warm professional Indian woman from a top Indian city. Read the following English text aloud in a clear Indian English accent — like a polished Indian HR professional or a friendly Indian bestie. Pronounce words the Indian way (e.g. "really" → "rilly", crisp consonants, soft 'r'). Sound warm and natural. Do NOT translate, do NOT explain — just speak the text exactly as written.`;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-audio",
+      model: "gpt-audio-mini",
       modalities: ["text", "audio"],
       audio: { voice, format: "mp3" },
       messages: [

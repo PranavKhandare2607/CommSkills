@@ -100,6 +100,7 @@ export default function Companion() {
   const [callStatus, setCallStatus] = useState<"ringing" | "connected">("ringing");
   const [callSeconds, setCallSeconds] = useState(0);
   const callTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const callStartTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // iOS Safari / most mobile browsers don't implement SpeechRecognition at all —
   // detect once so we can show a working fallback instead of a dead mic button.
   const [speechRecognitionSupported] = useState<boolean>(
@@ -116,7 +117,12 @@ export default function Companion() {
   const voiceModeRef = useRef<boolean>(false);
   const isMutedRef = useRef<boolean>(false);
   const isStreamingRef = useRef<boolean>(false);
+  const isSpeakingRef = useRef<boolean>(false);
   const isListeningRef = useRef<boolean>(false);
+  const responseAbortRef = useRef<AbortController | null>(null);
+  const sessionGenerationRef = useRef(0);
+  const lastSubmittedRef = useRef<{ text: string; at: number } | null>(null);
+  const interviewQuestionIndexRef = useRef(0);
   const sendMessageRef = useRef<((t: string) => void) | null>(null);
   const startListeningRef = useRef<(() => void) | null>(null);
   // HTMLAudioElement for server-generated TTS playback (real Indian voice)
@@ -135,6 +141,7 @@ export default function Companion() {
   useEffect(() => { voiceModeRef.current = voiceMode; }, [voiceMode]);
   useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
   useEffect(() => { isStreamingRef.current = isStreaming; }, [isStreaming]);
+  useEffect(() => { isSpeakingRef.current = isSpeaking; }, [isSpeaking]);
   useEffect(() => { isListeningRef.current = isListening; }, [isListening]);
   useEffect(() => { sessionStartedRef.current = sessionStarted; }, [sessionStarted]);
 
@@ -155,6 +162,8 @@ export default function Companion() {
   // Cleanup
   useEffect(() => {
     return () => {
+      responseAbortRef.current?.abort();
+      sessionGenerationRef.current += 1;
       ttsAbortRef.current?.abort();
       audioResolveRef.current?.();
       audioResolveRef.current = null;
@@ -202,6 +211,14 @@ export default function Companion() {
     speechQueueRef.current = [];
     queueRunningRef.current = false;
     setIsSpeaking(false);
+  }, []);
+
+  const cancelActiveResponse = useCallback(() => {
+    sessionGenerationRef.current += 1;
+    responseAbortRef.current?.abort();
+    responseAbortRef.current = null;
+    isStreamingRef.current = false;
+    setIsStreaming(false);
   }, []);
 
   // Mobile browsers (especially iOS Safari) only allow audio.play() when it's
@@ -352,7 +369,7 @@ export default function Companion() {
       if (voiceModeRef.current && !isMutedRef.current && !isListeningRef.current && !isStreamingRef.current) {
         setTimeout(() => {
           startListeningRef.current?.();
-        }, 350);
+        }, 75);
       }
     };
   }, []);
@@ -492,7 +509,7 @@ export default function Companion() {
       setIsListening(false);
       const txt = finalT.trim();
       if (voiceModeRef.current && txt) {
-        setTimeout(() => sendMessageRef.current?.(txt), 300);
+        setTimeout(() => sendMessageRef.current?.(txt), 75);
       }
     };
     try { recognition.start(); } catch { setIsListening(false); }
@@ -508,10 +525,20 @@ export default function Companion() {
   // ============================================================
   const sendMessage = useCallback(async (text: string) => {
     const trimmed = text.trim();
-    if (!trimmed || isStreaming) return;
+    if (!trimmed || isStreamingRef.current) return;
 
-    if (!sessionStarted) {
+    const now = Date.now();
+    const previous = lastSubmittedRef.current;
+    if (previous && previous.text === trimmed && now - previous.at < 1500) return;
+    lastSubmittedRef.current = { text: trimmed, at: now };
+    const requestGeneration = sessionGenerationRef.current;
+    const responseController = new AbortController();
+    responseAbortRef.current = responseController;
+    isStreamingRef.current = true;
+
+    if (!sessionStartedRef.current) {
       setSessionStarted(true);
+      sessionStartedRef.current = true;
       sessionStartTime.current = Date.now();
     }
 
@@ -552,12 +579,26 @@ export default function Companion() {
     };
 
     try {
-      const history = messages.map(m => ({ role: m.role, content: m.content }));
+      // The welcome card and an empty assistant placeholder are UI-only. Do
+      // not send them as conversation turns because they confuse interview
+      // question progression and can make the model repeat itself.
+      const history = messages
+        .filter(m => m.id !== "welcome" && m.content.trim() && !m.content.trim().startsWith("⚠️"))
+        .slice(-12)
+        .map(m => ({ role: m.role, content: m.content }));
       const res = await fetch("/api/companion/respond", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode, history, message: trimmed, language }),
+        body: JSON.stringify({
+          mode,
+          history,
+          message: trimmed,
+          language,
+          questionIndex: mode === "interview" ? interviewQuestionIndexRef.current : undefined,
+        }),
+        signal: responseController.signal,
       });
+      if (requestGeneration !== sessionGenerationRef.current) return;
       if (res.status === 402) {
         setMessages(prev => prev.map(m => m.id === botId
           ? { ...m, content: "AI Companion access is currently locked because your Premium trial has ended. Open Pricing to renew access, then try the interview again." }
@@ -571,6 +612,7 @@ export default function Companion() {
       const decoder = new TextDecoder();
       let buffer = "";
       let done = false;
+      let responseFailed = false;
       const processSseLine = (line: string) => {
         const t = line.trim();
         if (!t.startsWith("data:")) return;
@@ -580,6 +622,7 @@ export default function Companion() {
           const data = JSON.parse(json);
           if (data.error) {
             setMessages(prev => prev.map(m => m.id === botId ? { ...m, content: `⚠️ ${data.error}` } : m));
+            responseFailed = true;
             done = true;
             return;
           }
@@ -609,13 +652,21 @@ export default function Companion() {
       if (!done) {
         flushSpeakableSentences(true);
       }
+      if (!responseFailed && fullText.trim() && mode === "interview" && requestGeneration === sessionGenerationRef.current) {
+        interviewQuestionIndexRef.current = Math.min(interviewQuestionIndexRef.current + 1, 8);
+      }
     } catch (err: any) {
+      if (err?.name === "AbortError" || requestGeneration !== sessionGenerationRef.current) return;
       console.error("Companion stream error:", err);
       setMessages(prev => prev.map(m => m.id === botId ? { ...m, content: "⚠️ I couldn't respond right now. Please try again." } : m));
     } finally {
-      setIsStreaming(false);
+      if (responseAbortRef.current === responseController) responseAbortRef.current = null;
+      if (requestGeneration === sessionGenerationRef.current) {
+        isStreamingRef.current = false;
+        setIsStreaming(false);
+      }
     }
-  }, [messages, mode, language, isStreaming, sessionStarted, enqueueChunk, stopAllSpeech]);
+  }, [messages, mode, language, enqueueChunk, stopAllSpeech]);
 
   const handleSend = () => {
     if (input.trim()) sendMessage(input.trim());
@@ -666,26 +717,34 @@ export default function Companion() {
       startSession();
     }
     // Brief "ringing" beat for realism, then connect and let her speak first.
-    setTimeout(() => {
+    if (callStartTimeoutRef.current) clearTimeout(callStartTimeoutRef.current);
+    callStartTimeoutRef.current = setTimeout(() => {
       setCallStatus("connected");
       if (callTimerRef.current) clearInterval(callTimerRef.current);
       callTimerRef.current = setInterval(() => setCallSeconds(s => s + 1), 1000);
-       if (sessionStartedRef.current && speechRecognitionSupported && !isSpeaking) {
+       if (sessionStartedRef.current && speechRecognitionSupported && !isSpeakingRef.current) {
         // Session already running (e.g. resumed) — jump straight into listening.
         setTimeout(() => startListeningRef.current?.(), 300);
       }
-    }, 1600);
-  }, [startSession, stopAllSpeech, unlockAudioPlayback, speechRecognitionSupported, isSpeaking]);
+    }, 900);
+  }, [startSession, stopAllSpeech, unlockAudioPlayback, speechRecognitionSupported]);
 
   const endCall = useCallback(() => {
+    cancelActiveResponse();
     stopAllSpeech();
     stopListening();
     setIsCallActive(false);
+    setVoiceMode(false);
+    voiceModeRef.current = false;
     setCallStatus("ringing");
     setCallSeconds(0);
     try { document.body.style.overflow = ""; } catch {}
+    if (callStartTimeoutRef.current) {
+      clearTimeout(callStartTimeoutRef.current);
+      callStartTimeoutRef.current = null;
+    }
     if (callTimerRef.current) { clearInterval(callTimerRef.current); callTimerRef.current = null; }
-  }, [stopAllSpeech, stopListening]);
+  }, [cancelActiveResponse, stopAllSpeech, stopListening]);
 
   // Safety net: always restore body scroll if the component unmounts mid-call.
   useEffect(() => {
@@ -694,7 +753,7 @@ export default function Companion() {
 
   const sendCallText = useCallback(() => {
     const txt = callInput.trim();
-    if (!txt || isStreaming) return;
+    if (!txt || isStreamingRef.current) return;
     setCallInput("");
     sendMessageRef.current?.(txt);
   }, [callInput, isStreaming]);
@@ -709,14 +768,23 @@ export default function Companion() {
 
   const switchMode = useCallback((newMode: Mode) => {
     if (newMode === mode) return;
+    cancelActiveResponse();
     stopAllSpeech();
+    stopListening();
+    setIsCallActive(false);
+    setVoiceMode(false);
+    voiceModeRef.current = false;
+    try { document.body.style.overflow = ""; } catch {}
+    if (callStartTimeoutRef.current) clearTimeout(callStartTimeoutRef.current);
+    if (callTimerRef.current) { clearInterval(callTimerRef.current); callTimerRef.current = null; }
     setMode(newMode);
     setMessages([]);
     setShowFeedback(false);
     setFeedback(null);
     setSessionStarted(false);
     sessionStartedRef.current = false;
-  }, [mode]);
+    interviewQuestionIndexRef.current = 0;
+  }, [mode, cancelActiveResponse, stopAllSpeech, stopListening]);
 
   const endSession = useCallback(async () => {
     if (messages.length < 2) {
@@ -766,14 +834,16 @@ export default function Companion() {
   }, [messages, mode, cameraOn, updateProgress, queryClient]);
 
   const resetSession = useCallback(() => {
+    cancelActiveResponse();
     stopAllSpeech();
     setMessages([]);
     setShowFeedback(false);
     setFeedback(null);
     setSessionStarted(false);
     sessionStartedRef.current = false;
+    interviewQuestionIndexRef.current = 0;
     setInput("");
-  }, []);
+  }, [cancelActiveResponse, stopAllSpeech]);
 
   const openInNewTab = () => window.open(window.location.href, "_blank", "noopener,noreferrer");
   const showIframeBanner = inIframe && !bannerDismissed;

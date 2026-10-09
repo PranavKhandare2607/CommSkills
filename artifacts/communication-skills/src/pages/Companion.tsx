@@ -73,6 +73,19 @@ const CAMERA_TIPS = [
   { check: "eye-contact", message: "Maintain eye contact with the camera", icon: AlertCircle },
 ];
 
+function prepareCompanionSpeech(text: string): string {
+  return text
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/^\s*>\s?/gm, "")
+    .replace(/^\s*[-*+]\s+/gm, "")
+    .replace(/(\*\*|__)(.*?)\1/g, "$2")
+    .replace(/[*_`]/g, "")
+    .replace(/\n{2,}/g, ". ")
+    .replace(/[ \t]*\n[ \t]*/g, ". ")
+    .trim();
+}
+
 export default function Companion() {
   const [mode, setMode] = useState<Mode>("interview");
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -250,7 +263,7 @@ export default function Companion() {
   // Plays a single chunk of text and resolves once playback (or fallback) ends.
   const playChunk = useCallback((text: string, generation: number): Promise<void> => {
     return new Promise((resolve) => {
-      const clean = text.replace(/[*_#`>]/g, "").replace(/\([^)]*\)/g, "").replace(/\n{2,}/g, ". ").trim();
+      const clean = prepareCompanionSpeech(text);
       if (!clean || generation !== speechGenerationRef.current) {
         resolve();
         return;
@@ -713,7 +726,8 @@ export default function Companion() {
     isMutedRef.current = false;
     setCallInput("");
     try { document.body.style.overflow = "hidden"; } catch {}
-    if (!sessionStartedRef.current) {
+    const hadActiveSession = sessionStartedRef.current;
+    if (!hadActiveSession) {
       startSession();
     }
     // Brief "ringing" beat for realism, then connect and let her speak first.
@@ -722,7 +736,7 @@ export default function Companion() {
       setCallStatus("connected");
       if (callTimerRef.current) clearInterval(callTimerRef.current);
       callTimerRef.current = setInterval(() => setCallSeconds(s => s + 1), 1000);
-       if (sessionStartedRef.current && speechRecognitionSupported && !isSpeakingRef.current) {
+       if (hadActiveSession && speechRecognitionSupported && !isSpeakingRef.current) {
         // Session already running (e.g. resumed) — jump straight into listening.
         setTimeout(() => startListeningRef.current?.(), 300);
       }
@@ -1236,13 +1250,30 @@ export default function Companion() {
                         {mode === "interview" ? "A" : "P"}
                       </div>
                     )}
-                    <div className={cn(
-                      "max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap",
-                      m.role === "user"
-                        ? "bg-indigo-600 text-white rounded-tr-sm"
-                        : "bg-slate-100 text-slate-800 rounded-tl-sm"
-                    )}>
-                      {m.content || <span className="text-slate-400">...</span>}
+                    <div className="flex max-w-[80%] flex-col items-start gap-1.5">
+                      <div className={cn(
+                        "rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap",
+                        m.role === "user"
+                          ? "bg-indigo-600 text-white rounded-tr-sm"
+                          : "bg-slate-100 text-slate-800 rounded-tl-sm"
+                      )}>
+                        {m.content || <span className="text-slate-400">...</span>}
+                      </div>
+                      {m.role === "assistant" && m.content.trim() && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            unlockAudioPlayback();
+                            speakText(m.content);
+                          }}
+                          disabled={isStreaming}
+                          aria-label={`Read ${mode === "interview" ? "Aisha's" : "Priya's"} message aloud`}
+                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-indigo-600 transition-colors hover:bg-indigo-50 hover:text-indigo-800 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Volume2 className="h-3.5 w-3.5" />
+                          Read aloud
+                        </button>
+                      )}
                     </div>
                   </motion.div>
                 ))

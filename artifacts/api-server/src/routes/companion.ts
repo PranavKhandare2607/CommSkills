@@ -196,11 +196,17 @@ router.post("/companion/speak", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "text is required" });
     }
 
-    // Clean text: strip markdown / italic tips so the voice doesn't read symbols
+    // Remove markdown presentation only. Preserve every spoken word, including
+    // parenthetical examples and interview tips shown in the chat transcript.
     const clean = text
-      .replace(/[*_#`>]/g, "")
-      .replace(/\([^)]*Tip:[^)]*\)/gi, "")
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+      .replace(/^\s*>\s?/gm, "")
+      .replace(/^\s*[-*+]\s+/gm, "")
+      .replace(/(\*\*|__)(.*?)\1/g, "$2")
+      .replace(/[*_`]/g, "")
       .replace(/\n{2,}/g, ". ")
+      .replace(/[ \t]*\n[ \t]*/g, ". ")
       .trim();
     if (!clean) {
       return res.status(400).json({ error: "no speakable text" });
@@ -214,10 +220,10 @@ router.post("/companion/speak", requireAuth, async (req, res) => {
     const personaName = mode === "friend" ? "Priya" : "Aisha";
     const accentInstruction =
       langKey === "hindi"
-        ? `You are ${personaName}, a warm Indian woman speaking native Hindi. Read the following Hindi text aloud in a clear, natural, friendly Indian female voice with proper Hindi pronunciation. Use a warm, conversational tone like an Indian woman speaking to a friend. Do NOT translate, do NOT explain — just speak the text exactly as written.`
+        ? `You are ${personaName}, a warm Indian woman speaking native Hindi. Read the following Hindi text aloud in a clear, natural, friendly Indian female voice with proper Hindi pronunciation. Use a warm, conversational tone like an Indian woman speaking to a friend. Read every word exactly as provided, including text inside parentheses. Do NOT translate, omit, summarize, or add anything.`
         : langKey === "hinglish"
-        ? `You are ${personaName}, a friendly young Indian woman who speaks Hinglish (Hindi mixed with English) the way urban Indians chat in WhatsApp. Read the following Hinglish text aloud in a natural Indian female voice with a warm Indian accent. Pronounce Hindi words (yaar, achha, haan, matlab, bahut, etc.) with proper Hindi pronunciation, and English words with an Indian English accent. Sound friendly and conversational — like a desi best friend. Do NOT translate, do NOT explain — just speak the text exactly as written.`
-        : `You are ${personaName}, a warm professional Indian woman from a top Indian city. Read the following English text aloud in a clear Indian English accent — like a polished Indian HR professional or a friendly Indian bestie. Pronounce words the Indian way (e.g. "really" → "rilly", crisp consonants, soft 'r'). Sound warm and natural. Do NOT translate, do NOT explain — just speak the text exactly as written.`;
+        ? `You are ${personaName}, a friendly young Indian woman who speaks Hinglish (Hindi mixed with English) the way urban Indians chat in WhatsApp. Read the following Hinglish text aloud in a natural Indian female voice with a warm Indian accent. Pronounce Hindi words (yaar, achha, haan, matlab, bahut, etc.) with proper Hindi pronunciation, and English words with an Indian English accent. Sound friendly and conversational — like a desi best friend. Read every word exactly as provided, including text inside parentheses. Do NOT translate, omit, summarize, or add anything.`
+        : `You are ${personaName}, a warm professional Indian woman from a top Indian city. Read the following English text aloud in a clear Indian English accent — like a polished Indian HR professional or a friendly Indian bestie. Sound warm and natural. Read every word exactly as provided, including text inside parentheses. Do NOT translate, omit, summarize, or add anything.`;
 
     const completion = await openai.chat.completions.create({
       model: "gpt-audio-mini",

@@ -144,6 +144,9 @@ export default function Companion() {
   const ttsAbortRef = useRef<AbortController | null>(null);
   const audioResolveRef = useRef<(() => void) | null>(null);
   const speechGenerationRef = useRef(0);
+  const audioUnlockGenerationRef = useRef(0);
+  const audioUnlockPromiseRef = useRef<Promise<void> | null>(null);
+  const audioPlaybackUnlockedRef = useRef(false);
   // Sentence-chunked speech queue — lets us start speaking the first sentence
   // as soon as it streams in, instead of waiting for the whole reply.
   const speechQueueRef = useRef<string[]>([]);
@@ -177,6 +180,8 @@ export default function Companion() {
     return () => {
       responseAbortRef.current?.abort();
       sessionGenerationRef.current += 1;
+      audioUnlockGenerationRef.current += 1;
+      audioUnlockPromiseRef.current = null;
       ttsAbortRef.current?.abort();
       audioResolveRef.current?.();
       audioResolveRef.current = null;
@@ -203,6 +208,8 @@ export default function Companion() {
   // Cleanly stop any ongoing server-generated speech.
   const stopAllSpeech = useCallback(() => {
     speechGenerationRef.current += 1;
+    audioUnlockGenerationRef.current += 1;
+    audioUnlockPromiseRef.current = null;
     ttsAbortRef.current?.abort();
     ttsAbortRef.current = null;
     audioResolveRef.current?.();
@@ -241,23 +248,57 @@ export default function Companion() {
   // cycle directly inside the click handler — after that, later programmatic
   // play() calls on the same element are allowed even from async code.
   const SILENT_WAV = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
-  const unlockAudioPlayback = useCallback(() => {
+  const unlockAudioPlayback = useCallback((): Promise<void> => {
+    if (audioPlaybackUnlockedRef.current) return Promise.resolve();
+    if (audioUnlockPromiseRef.current) return audioUnlockPromiseRef.current;
+    if (!audioElRef.current) audioElRef.current = new Audio();
+
+    const audio = audioElRef.current;
+    const generation = audioUnlockGenerationRef.current;
+    audio.muted = true;
+    audio.src = SILENT_WAV;
+
+    let playPromise: Promise<void>;
     try {
-      if (!audioElRef.current) audioElRef.current = new Audio();
-      const audio = audioElRef.current;
-      const prevSrc = audio.src;
-      audio.muted = true;
-      audio.src = SILENT_WAV;
-      const p = audio.play();
-      if (p && typeof p.then === "function") {
-        p.then(() => {
-          audio.pause();
-          audio.currentTime = 0;
-          audio.muted = false;
-          if (prevSrc) audio.src = prevSrc;
-        }).catch(() => { audio.muted = false; });
-      }
-    } catch {}
+      // Call play synchronously so mobile browsers associate it with the
+      // user's click/tap. Speech playback waits for this promise to settle.
+      playPromise = audio.play();
+    } catch {
+      audio.muted = false;
+      return Promise.resolve();
+    }
+
+    let trackedPromise: Promise<void>;
+    trackedPromise = Promise.resolve(playPromise)
+      .then(() => {
+        if (generation === audioUnlockGenerationRef.current) {
+          audioPlaybackUnlockedRef.current = true;
+        }
+      })
+      .catch(() => {
+        // The actual playback path reports a useful error if sound is blocked.
+      })
+      .finally(() => {
+        // Never restore a previous audio URL: it may be a newer reply.
+        if (
+          generation === audioUnlockGenerationRef.current &&
+          audio.getAttribute("src") === SILENT_WAV
+        ) {
+          try {
+            audio.pause();
+            audio.currentTime = 0;
+            audio.muted = false;
+            audio.removeAttribute("src");
+            audio.load();
+          } catch {}
+        }
+        if (audioUnlockPromiseRef.current === trackedPromise) {
+          audioUnlockPromiseRef.current = null;
+        }
+      });
+
+    audioUnlockPromiseRef.current = trackedPromise;
+    return trackedPromise;
   }, []);
 
   // Plays a single chunk of text and resolves once playback (or fallback) ends.
@@ -350,7 +391,11 @@ export default function Companion() {
     if (queueRunningRef.current) return;
     const generation = speechGenerationRef.current;
     queueRunningRef.current = true;
-    setIsSpeaking(true);
+    // A user-triggered unlock may still be completing. Do not let the unlock
+    // clip pause or replace a real reply that has already started.
+    const pendingUnlock = audioUnlockPromiseRef.current;
+    if (pendingUnlock) await pendingUnlock;
+    if (generation !== speechGenerationRef.current) return;
     while (generation === speechGenerationRef.current && speechQueueRef.current.length > 0) {
       const next = speechQueueRef.current.shift()!;
       await playChunk(next, generation);
@@ -370,10 +415,13 @@ export default function Companion() {
   }, [runSpeechQueue]);
 
   // Kept for the (rare) case a full message needs to be spoken in one shot.
-  const speakText = useCallback((text: string) => {
+  const speakText = useCallback(async (text: string) => {
     stopAllSpeech();
+    const generation = speechGenerationRef.current;
+    await unlockAudioPlayback();
+    if (generation !== speechGenerationRef.current) return;
     enqueueChunk(text);
-  }, [stopAllSpeech, enqueueChunk]);
+  }, [stopAllSpeech, unlockAudioPlayback, enqueueChunk]);
 
   // Ref to call the latest auto-listen handler from speakText.onend
   const autoListenAfterSpeakRef = useRef<(() => void) | null>(null);
@@ -556,6 +604,9 @@ export default function Companion() {
     }
 
     stopAllSpeech();
+    // Begin the silent unlock while this send is still inside the user's
+    // click/tap handler. Streamed speech waits for it before using the element.
+    void unlockAudioPlayback();
 
     const userMsg: Msg = { id: `u-${Date.now()}`, role: "user", content: trimmed };
     const botId = `a-${Date.now() + 1}`;
@@ -679,7 +730,7 @@ export default function Companion() {
         setIsStreaming(false);
       }
     }
-  }, [messages, mode, language, enqueueChunk, stopAllSpeech]);
+  }, [messages, mode, language, enqueueChunk, stopAllSpeech, unlockAudioPlayback]);
 
   const handleSend = () => {
     if (input.trim()) sendMessage(input.trim());
@@ -693,7 +744,6 @@ export default function Companion() {
   // SESSION MANAGEMENT
   // ============================================================
   const startSession = useCallback(() => {
-    unlockAudioPlayback();
     const welcome = WELCOME_MSGS[mode][language];
     setMessages([{ id: "welcome", role: "assistant", content: welcome }]);
     setSessionStarted(true);
@@ -706,7 +756,7 @@ export default function Companion() {
     if (!cameraOn) {
       startCamera().catch(() => {});
     }
-  }, [mode, language, cameraOn, startCamera, speakText, unlockAudioPlayback]);
+  }, [mode, language, cameraOn, startCamera, speakText]);
 
   // ============================================================
   // "CALL" — in-app, phone-call-style voice conversation
@@ -715,7 +765,6 @@ export default function Companion() {
   const startCall = useCallback(() => {
     // Must run synchronously inside the click handler (before any async work)
     // so mobile browsers treat subsequent audio playback as user-initiated.
-    unlockAudioPlayback();
     stopAllSpeech();
     setIsCallActive(true);
     setCallStatus("ringing");
@@ -729,6 +778,8 @@ export default function Companion() {
     const hadActiveSession = sessionStartedRef.current;
     if (!hadActiveSession) {
       startSession();
+    } else {
+      void unlockAudioPlayback();
     }
     // Brief "ringing" beat for realism, then connect and let her speak first.
     if (callStartTimeoutRef.current) clearTimeout(callStartTimeoutRef.current);
@@ -1262,10 +1313,7 @@ export default function Companion() {
                       {m.role === "assistant" && m.content.trim() && (
                         <button
                           type="button"
-                          onClick={() => {
-                            unlockAudioPlayback();
-                            speakText(m.content);
-                          }}
+                           onClick={() => { void speakText(m.content); }}
                           disabled={isStreaming}
                           aria-label={`Read ${mode === "interview" ? "Aisha's" : "Priya's"} message aloud`}
                           className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-indigo-600 transition-colors hover:bg-indigo-50 hover:text-indigo-800 disabled:cursor-not-allowed disabled:opacity-50"

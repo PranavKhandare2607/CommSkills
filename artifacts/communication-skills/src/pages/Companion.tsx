@@ -853,6 +853,7 @@ export default function Companion() {
 
     // Reset sentence-chunk cursor for this new reply
     let fullText = "";
+    let shouldAdvanceInterview = true;
     spokenUpToRef.current = 0;
 
     // Scans any newly-arrived text for complete sentences and queues them
@@ -921,6 +922,7 @@ export default function Companion() {
         if (!json || json === "[DONE]") return;
         try {
           const data = JSON.parse(json);
+          if (data.interviewAdvance === false) shouldAdvanceInterview = false;
           if (data.error) {
             setMessages(prev => prev.map(m => m.id === botId ? { ...m, content: `⚠️ ${data.error}` } : m));
             responseFailed = true;
@@ -953,7 +955,13 @@ export default function Companion() {
       if (!done) {
         flushSpeakableSentences(true);
       }
-      if (!responseFailed && fullText.trim() && mode === "interview" && requestGeneration === sessionGenerationRef.current) {
+      if (fullText.trim()) {
+        latestAssistantSpeechRef.current = {
+          text: normalizedSpeechText(fullText),
+          at: Date.now(),
+        };
+      }
+      if (!responseFailed && shouldAdvanceInterview && fullText.trim() && mode === "interview" && requestGeneration === sessionGenerationRef.current) {
         void requestAnswerScore(
           botId,
           interviewQuestionFor(answerQuestionIndex, profileForThisAnswer.roleTitle),
@@ -972,6 +980,7 @@ export default function Companion() {
       if (requestGeneration === sessionGenerationRef.current) {
         isStreamingRef.current = false;
         setIsStreaming(false);
+        if (fullText.trim()) autoListenAfterSpeakRef.current?.();
       }
     }
   }, [messages, mode, language, interviewProfile, enqueueChunk, stopAllSpeech, unlockAudioPlayback, requestAnswerScore]);
@@ -1476,7 +1485,7 @@ export default function Companion() {
                   ))}
                 </div>
                 <button
-                  onClick={() => setVoiceMode(v => !v)}
+                  onClick={toggleVoiceMode}
                   className={cn(
                     "text-xs px-2.5 py-1 rounded-lg font-medium border flex items-center gap-1",
                     voiceMode ? "bg-rose-100 text-rose-700 border-rose-200" : "bg-slate-100 text-slate-500 border-slate-200"
@@ -1487,7 +1496,7 @@ export default function Companion() {
                   {voiceMode ? "Voice ON" : "Voice OFF"}
                 </button>
                 <button
-                  onClick={() => { setIsMuted(m => !m); stopAllSpeech(); }}
+                  onClick={toggleMute}
                   className={cn(
                     "text-xs px-2.5 py-1 rounded-lg font-medium border flex items-center gap-1",
                     isMuted ? "bg-slate-100 text-slate-500 border-slate-200" : "bg-indigo-50 text-indigo-600 border-indigo-100"
@@ -1904,7 +1913,7 @@ export default function Companion() {
               {/* Bottom: controls */}
               <div className="flex items-center gap-5 sm:gap-6 mb-1 shrink-0">
                 <button
-                  onClick={() => { setIsMuted(m => !m); if (!isMuted) stopAllSpeech(); }}
+                  onClick={toggleMute}
                   className={cn(
                     "w-14 h-14 rounded-full flex items-center justify-center transition-all active:scale-95",
                     isMuted ? "bg-white text-slate-900" : "bg-white/15 text-white hover:bg-white/25"

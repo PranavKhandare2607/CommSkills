@@ -196,6 +196,30 @@ function prepareCompanionSpeech(text: string): string {
     .trim();
 }
 
+function normalizedSpeechText(text: string): string {
+  return prepareCompanionSpeech(text)
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isLikelyAssistantEcho(
+  transcript: string,
+  latestAssistantSpeech: { text: string; at: number },
+): boolean {
+  if (!latestAssistantSpeech.text || Date.now() - latestAssistantSpeech.at > 20000) return false;
+  const heard = normalizedSpeechText(transcript);
+  if (!heard) return false;
+  if (latestAssistantSpeech.text.includes(heard) && heard.split(" ").length >= 3) return true;
+
+  const heardWords = heard.split(" ").filter(word => word.length > 1);
+  if (heardWords.length < 5) return false;
+  const spokenWords = new Set(latestAssistantSpeech.text.split(" "));
+  const overlap = heardWords.filter(word => spokenWords.has(word)).length / heardWords.length;
+  return overlap >= 0.78;
+}
+
 export default function Companion() {
   const [mode, setMode] = useState<Mode>("interview");
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -268,6 +292,7 @@ export default function Companion() {
   const speechQueueRef = useRef<string[]>([]);
   const queueRunningRef = useRef(false);
   const spokenUpToRef = useRef(0);
+  const latestAssistantSpeechRef = useRef({ text: "", at: 0 });
 
   // Sync refs with state for use inside callbacks/event handlers
   useEffect(() => { voiceModeRef.current = voiceMode; }, [voiceMode]);
@@ -347,6 +372,7 @@ export default function Companion() {
     }
     speechQueueRef.current = [];
     queueRunningRef.current = false;
+    isSpeakingRef.current = false;
     setIsSpeaking(false);
   }, []);
 
@@ -535,6 +561,10 @@ export default function Companion() {
   const speakText = useCallback(async (text: string) => {
     stopAllSpeech();
     const generation = speechGenerationRef.current;
+    latestAssistantSpeechRef.current = {
+      text: normalizedSpeechText(text),
+      at: Date.now(),
+    };
     await unlockAudioPlayback();
     if (generation !== speechGenerationRef.current) return;
     enqueueChunk(text);
@@ -544,10 +574,12 @@ export default function Companion() {
   const autoListenAfterSpeakRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     autoListenAfterSpeakRef.current = () => {
-      if (voiceModeRef.current && !isMutedRef.current && !isListeningRef.current && !isStreamingRef.current) {
+      if (voiceModeRef.current && !isMutedRef.current && !isListeningRef.current && !isStreamingRef.current && !queueRunningRef.current) {
         setTimeout(() => {
-          startListeningRef.current?.();
-        }, 75);
+          if (voiceModeRef.current && !isMutedRef.current && !isListeningRef.current && !isStreamingRef.current && !queueRunningRef.current) {
+            startListeningRef.current?.();
+          }
+        }, 250);
       }
     };
   }, []);
@@ -662,7 +694,11 @@ export default function Companion() {
     recognition.maxAlternatives = 1;
 
     let finalT = "";
-    recognition.onstart = () => { setIsListening(true); finalT = ""; };
+    recognition.onstart = () => {
+      isListeningRef.current = true;
+      setIsListening(true);
+      finalT = "";
+    };
     recognition.onresult = (event: any) => {
       let interim = "";
       finalT = "";
@@ -674,6 +710,7 @@ export default function Companion() {
     };
     recognition.onerror = (event: any) => {
       console.warn("Recognition error:", event.error);
+      isListeningRef.current = false;
       setIsListening(false);
       if (event.error === "not-allowed") {
         alert("Microphone permission denied.");
@@ -684,19 +721,64 @@ export default function Companion() {
       }
     };
     recognition.onend = () => {
+      isListeningRef.current = false;
       setIsListening(false);
+      if (recognition.__commSkillsDiscardResult) {
+        recognition.__commSkillsDiscardResult = false;
+        setInput("");
+        return;
+      }
       const txt = finalT.trim();
       if (voiceModeRef.current && txt) {
-        setTimeout(() => sendMessageRef.current?.(txt), 75);
+        if (isLikelyAssistantEcho(txt, latestAssistantSpeechRef.current)) {
+          setInput("");
+          setVoiceError("I heard the coach’s voice through the microphone and ignored it. Please answer when you’re ready.");
+          setTimeout(() => {
+            if (voiceModeRef.current && !isMutedRef.current && !isStreamingRef.current && !isListeningRef.current) {
+              startListeningRef.current?.();
+            }
+          }, 600);
+          return;
+        }
+        setVoiceError(null);
+        setTimeout(() => {
+          if (voiceModeRef.current && !isStreamingRef.current) sendMessageRef.current?.(txt);
+        }, 75);
       }
     };
-    try { recognition.start(); } catch { setIsListening(false); }
+    try { recognition.start(); } catch {
+      isListeningRef.current = false;
+      setIsListening(false);
+    }
   }, [voiceMode]);
 
   const stopListening = useCallback(() => {
-    recognitionRef.current?.stop();
+    const recognition = recognitionRef.current;
+    if (recognition && isListeningRef.current) {
+      recognition.__commSkillsDiscardResult = true;
+    }
+    recognition?.stop();
+    isListeningRef.current = false;
     setIsListening(false);
   }, []);
+
+  const toggleVoiceMode = useCallback(() => {
+    const next = !voiceModeRef.current;
+    voiceModeRef.current = next;
+    setVoiceMode(next);
+    if (!next) {
+      stopListening();
+    } else if (sessionStartedRef.current && !isSpeakingRef.current && !isStreamingRef.current) {
+      void startListening();
+    }
+  }, [startListening, stopListening]);
+
+  const toggleMute = useCallback(() => {
+    const next = !isMutedRef.current;
+    isMutedRef.current = next;
+    setIsMuted(next);
+    if (next) stopAllSpeech();
+  }, [stopAllSpeech]);
 
   // ============================================================
   // CHAT — Stream from /api/companion/respond

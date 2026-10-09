@@ -10,6 +10,7 @@ import {
   Sparkles,
   Library,
   Heart,
+  Gamepad2,
   Menu, 
   X,
   Trophy,
@@ -36,6 +37,7 @@ const navItems = [
   { href: "/word", label: "Word Practice", icon: Sparkles },
   { href: "/companion", label: "AI Companion", icon: Heart, isPrimary: true },
   { href: "/resources", label: "Resources", icon: Library },
+  { href: "/games", label: "Practice Games", icon: Gamepad2 },
 ];
 
 export function AppLayout({ children }: { children: React.ReactNode }) {

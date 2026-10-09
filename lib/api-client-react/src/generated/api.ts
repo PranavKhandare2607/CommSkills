@@ -19,6 +19,9 @@ import type {
 import type {
   AnalyzeBody,
   AnalyzeResult,
+  CompanionAnswerScore,
+  CompanionAnswerScoreInput,
+  CompanionRespondInput,
   CreateOpenaiConversationBody,
   GrammarCheckBody,
   GrammarCheckResult,
@@ -1224,4 +1227,177 @@ export const useSaveSpeakingSession = <
   TContext
 > => {
   return useMutation(getSaveSpeakingSessionMutationOptions(options));
+};
+
+/**
+ * @summary Stream an AI companion or job-targeted interview response
+ */
+export const getRespondCompanionUrl = () => {
+  return `/api/companion/respond`;
+};
+
+export const respondCompanion = async (
+  companionRespondInput: CompanionRespondInput,
+  options?: RequestInit,
+): Promise<unknown> => {
+  return customFetch<unknown>(getRespondCompanionUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(companionRespondInput),
+  });
+};
+
+export const getRespondCompanionMutationOptions = <
+  TError = ErrorType<OpenaiError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof respondCompanion>>,
+    TError,
+    { data: BodyType<CompanionRespondInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof respondCompanion>>,
+  TError,
+  { data: BodyType<CompanionRespondInput> },
+  TContext
+> => {
+  const mutationKey = ["respondCompanion"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof respondCompanion>>,
+    { data: BodyType<CompanionRespondInput> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return respondCompanion(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RespondCompanionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof respondCompanion>>
+>;
+export type RespondCompanionMutationBody = BodyType<CompanionRespondInput>;
+export type RespondCompanionMutationError = ErrorType<OpenaiError>;
+
+/**
+ * @summary Stream an AI companion or job-targeted interview response
+ */
+export const useRespondCompanion = <
+  TError = ErrorType<OpenaiError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof respondCompanion>>,
+    TError,
+    { data: BodyType<CompanionRespondInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof respondCompanion>>,
+  TError,
+  { data: BodyType<CompanionRespondInput> },
+  TContext
+> => {
+  return useMutation(getRespondCompanionMutationOptions(options));
+};
+
+/**
+ * @summary Score one interview answer against its role and question
+ */
+export const getScoreCompanionAnswerUrl = () => {
+  return `/api/companion/answer-score`;
+};
+
+export const scoreCompanionAnswer = async (
+  companionAnswerScoreInput: CompanionAnswerScoreInput,
+  options?: RequestInit,
+): Promise<CompanionAnswerScore> => {
+  return customFetch<CompanionAnswerScore>(getScoreCompanionAnswerUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(companionAnswerScoreInput),
+  });
+};
+
+export const getScoreCompanionAnswerMutationOptions = <
+  TError = ErrorType<OpenaiError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof scoreCompanionAnswer>>,
+    TError,
+    { data: BodyType<CompanionAnswerScoreInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof scoreCompanionAnswer>>,
+  TError,
+  { data: BodyType<CompanionAnswerScoreInput> },
+  TContext
+> => {
+  const mutationKey = ["scoreCompanionAnswer"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof scoreCompanionAnswer>>,
+    { data: BodyType<CompanionAnswerScoreInput> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return scoreCompanionAnswer(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ScoreCompanionAnswerMutationResult = NonNullable<
+  Awaited<ReturnType<typeof scoreCompanionAnswer>>
+>;
+export type ScoreCompanionAnswerMutationBody =
+  BodyType<CompanionAnswerScoreInput>;
+export type ScoreCompanionAnswerMutationError = ErrorType<OpenaiError>;
+
+/**
+ * @summary Score one interview answer against its role and question
+ */
+export const useScoreCompanionAnswer = <
+  TError = ErrorType<OpenaiError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof scoreCompanionAnswer>>,
+    TError,
+    { data: BodyType<CompanionAnswerScoreInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof scoreCompanionAnswer>>,
+  TError,
+  { data: BodyType<CompanionAnswerScoreInput> },
+  TContext
+> => {
+  return useMutation(getScoreCompanionAnswerMutationOptions(options));
 };

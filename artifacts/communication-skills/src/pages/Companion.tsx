@@ -7,7 +7,12 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FemaleAvatar } from "@/components/companion/FemaleAvatar";
-import { useUpdateProgress } from "@workspace/api-client-react";
+import {
+  useScoreCompanionAnswer,
+  useUpdateProgress,
+  type CompanionAnswerScore,
+  type CompanionInterviewProfile,
+} from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getGetProgressQueryKey } from "@workspace/api-client-react";
 import aishaThumb from "@/assets/aisha-closed.png";
@@ -31,7 +36,112 @@ interface FeedbackResult {
   improvements: string[];
 }
 
+type InterviewProfile = Required<CompanionInterviewProfile>;
+
+interface AnswerScorecardEntry {
+  status: "loading" | "ready" | "error";
+  question: string;
+  answer: string;
+  profile: InterviewProfile;
+  score?: CompanionAnswerScore;
+}
+
 type LangKey = "english" | "hindi" | "hinglish";
+
+function interviewQuestionFor(index: number, roleTitle: string): string {
+  const role = roleTitle.trim() || "the role you're targeting";
+  const questions = [
+    `Tell me about yourself and what interests you about the ${role} role.`,
+    `Which strength would help you most in the ${role} role, and can you give a specific example?`,
+    `Which skill related to the ${role} role are you working to improve, and what are you doing about it?`,
+    `What evidence from your experience shows that you are ready to succeed as a ${role}?`,
+    `Tell me about a challenging situation relevant to ${role} work and how you handled it.`,
+    `How would you like to grow over the next few years in the ${role} role?`,
+    `What would you focus on during your first 90 days as a ${role}?`,
+    "Tell me about a time you worked with others to deliver a result relevant to this role.",
+    "What questions do you have about the role or team?",
+  ];
+  return questions[index] ?? questions[questions.length - 1];
+}
+
+function interviewWelcomeFor(profile: InterviewProfile, language: LangKey): string {
+  const role = profile.roleTitle.trim();
+  if (language === "hindi") {
+    return `नमस्ते! मैं आइशा हूं, आपकी इंटरव्यू कोच। आज हम ${role} भूमिका के लिए mock interview करेंगे। अपने बारे में बताइए और इस भूमिका से जुड़ा अपना अनुभव साझा कीजिए।`;
+  }
+  if (language === "hinglish") {
+    return `Hello! Main Aisha hoon, aapki interview coach. Aaj hum ${role} role ke liye mock interview karenge (${profile.experienceLevel}). Apne baare mein batayein aur is role se related apna experience share kijiye.`;
+  }
+  return `Hello! I'm Aisha, your interview coach. We'll practice for the ${role} role at the ${profile.experienceLevel} level. ${interviewQuestionFor(0, role)}`;
+}
+
+function AnswerScorecardPanel({
+  entry,
+  onRetry,
+}: {
+  entry: AnswerScorecardEntry;
+  onRetry: () => void;
+}) {
+  if (entry.status === "loading") {
+    return (
+      <div role="status" aria-live="polite" className="w-full rounded-xl border border-indigo-100 bg-indigo-50/70 p-3 text-xs font-medium text-indigo-700">
+        Aisha is scoring this answer…
+      </div>
+    );
+  }
+
+  if (entry.status === "error" || !entry.score) {
+    return (
+      <div className="w-full rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+        <div className="flex items-center justify-between gap-3">
+          <span>Couldn’t score this answer right now.</span>
+          <button type="button" onClick={onRetry} className="font-semibold underline underline-offset-2">
+            Try again
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const score = entry.score;
+  const dimensions = [
+    { label: "Relevance", value: score.relevanceScore },
+    { label: "Structure", value: score.structureScore },
+    { label: "Clarity", value: score.clarityScore },
+    { label: "Specificity", value: score.specificityScore },
+  ];
+
+  return (
+    <div className="w-full rounded-xl border border-indigo-100 bg-white p-3 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[10px] font-bold uppercase tracking-wide text-indigo-500">Answer scorecard</p>
+          <p className="mt-0.5 text-xs leading-relaxed text-slate-700">{score.summary}</p>
+        </div>
+        <div className="shrink-0 rounded-xl bg-indigo-50 px-3 py-2 text-center">
+          <span className="block text-lg font-bold leading-none text-indigo-700">{score.overallScore}</span>
+          <span className="text-[9px] font-semibold uppercase text-indigo-500">/ 100</span>
+        </div>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        {dimensions.map(({ label, value }) => (
+          <div key={label} className="rounded-lg bg-slate-50 px-2.5 py-2">
+            <div className="mb-1 flex items-center justify-between gap-2 text-[10px] font-medium text-slate-600">
+              <span>{label}</span><span>{value}</span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-slate-200">
+              <div className="h-full rounded-full bg-indigo-500" style={{ width: `${value}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 space-y-2 text-xs">
+        <p className="text-slate-700"><span className="font-semibold text-emerald-700">Strength: </span>{score.strength}</p>
+        <p className="text-slate-700"><span className="font-semibold text-indigo-700">Next step: </span>{score.improvement}</p>
+      </div>
+    </div>
+  );
+}
 
 const WELCOME_MSGS: Record<"interview" | "friend", Record<LangKey, string>> = {
   interview: {
@@ -100,6 +210,12 @@ export default function Companion() {
   const [sessionStarted, setSessionStarted] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedback, setFeedback] = useState<FeedbackResult | null>(null);
+  const [interviewProfile, setInterviewProfile] = useState<InterviewProfile>({
+    roleTitle: "",
+    experienceLevel: "Early career",
+    jobDescription: "",
+  });
+  const [answerScorecards, setAnswerScorecards] = useState<Record<string, AnswerScorecardEntry>>({});
   const [loadingFeedback, setLoadingFeedback] = useState(false);
   const [voiceMode, setVoiceMode] = useState(false);
   const [inIframe, setInIframe] = useState(false);
@@ -163,6 +279,7 @@ export default function Companion() {
 
   const queryClient = useQueryClient();
   const { mutate: updateProgress } = useUpdateProgress();
+  const { mutateAsync: scoreCompanionAnswer } = useScoreCompanionAnswer();
   const modeInfo = MODE_INFO[mode];
 
   // Iframe detection
@@ -584,6 +701,41 @@ export default function Companion() {
   // ============================================================
   // CHAT — Stream from /api/companion/respond
   // ============================================================
+  const requestAnswerScore = useCallback(async (
+    assistantMessageId: string,
+    question: string,
+    answer: string,
+    profile: InterviewProfile,
+    requestGeneration: number,
+  ) => {
+    setAnswerScorecards(previous => ({
+      ...previous,
+      [assistantMessageId]: { status: "loading", question, answer, profile },
+    }));
+    try {
+      const score = await scoreCompanionAnswer({
+        data: {
+          roleTitle: profile.roleTitle.trim(),
+          experienceLevel: profile.experienceLevel,
+          jobDescription: profile.jobDescription.trim() || undefined,
+          question,
+          answer,
+        },
+      });
+      if (requestGeneration !== sessionGenerationRef.current) return;
+      setAnswerScorecards(previous => ({
+        ...previous,
+        [assistantMessageId]: { status: "ready", question, answer, profile, score },
+      }));
+    } catch {
+      if (requestGeneration !== sessionGenerationRef.current) return;
+      setAnswerScorecards(previous => ({
+        ...previous,
+        [assistantMessageId]: { status: "error", question, answer, profile },
+      }));
+    }
+  }, [scoreCompanionAnswer]);
+
   const sendMessage = useCallback(async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || isStreamingRef.current) return;
@@ -593,6 +745,8 @@ export default function Companion() {
     if (previous && previous.text === trimmed && now - previous.at < 1500) return;
     lastSubmittedRef.current = { text: trimmed, at: now };
     const requestGeneration = sessionGenerationRef.current;
+    const answerQuestionIndex = interviewQuestionIndexRef.current;
+    const profileForThisAnswer = { ...interviewProfile };
     const responseController = new AbortController();
     responseAbortRef.current = responseController;
     isStreamingRef.current = true;
@@ -659,6 +813,7 @@ export default function Companion() {
           message: trimmed,
           language,
           questionIndex: mode === "interview" ? interviewQuestionIndexRef.current : undefined,
+          interviewProfile: mode === "interview" ? profileForThisAnswer : undefined,
         }),
         signal: responseController.signal,
       });
@@ -717,6 +872,13 @@ export default function Companion() {
         flushSpeakableSentences(true);
       }
       if (!responseFailed && fullText.trim() && mode === "interview" && requestGeneration === sessionGenerationRef.current) {
+        void requestAnswerScore(
+          botId,
+          interviewQuestionFor(answerQuestionIndex, profileForThisAnswer.roleTitle),
+          trimmed,
+          profileForThisAnswer,
+          requestGeneration,
+        );
         interviewQuestionIndexRef.current = Math.min(interviewQuestionIndexRef.current + 1, 8);
       }
     } catch (err: any) {
@@ -730,7 +892,7 @@ export default function Companion() {
         setIsStreaming(false);
       }
     }
-  }, [messages, mode, language, enqueueChunk, stopAllSpeech, unlockAudioPlayback]);
+  }, [messages, mode, language, interviewProfile, enqueueChunk, stopAllSpeech, unlockAudioPlayback, requestAnswerScore]);
 
   const handleSend = () => {
     if (input.trim()) sendMessage(input.trim());
@@ -744,7 +906,9 @@ export default function Companion() {
   // SESSION MANAGEMENT
   // ============================================================
   const startSession = useCallback(() => {
-    const welcome = WELCOME_MSGS[mode][language];
+    const welcome = mode === "interview"
+      ? interviewWelcomeFor(interviewProfile, language)
+      : WELCOME_MSGS.friend[language];
     setMessages([{ id: "welcome", role: "assistant", content: welcome }]);
     setSessionStarted(true);
     sessionStartedRef.current = true;
@@ -756,13 +920,17 @@ export default function Companion() {
     if (!cameraOn) {
       startCamera().catch(() => {});
     }
-  }, [mode, language, cameraOn, startCamera, speakText]);
+  }, [mode, language, interviewProfile, cameraOn, startCamera, speakText]);
 
   // ============================================================
   // "CALL" — in-app, phone-call-style voice conversation
   // (no real phone number involved — this rings & connects inside the browser)
   // ============================================================
   const startCall = useCallback(() => {
+    if (mode === "interview" && !interviewProfile.roleTitle.trim()) {
+      alert("Enter a target job role before starting the interview.");
+      return;
+    }
     // Must run synchronously inside the click handler (before any async work)
     // so mobile browsers treat subsequent audio playback as user-initiated.
     stopAllSpeech();
@@ -792,7 +960,7 @@ export default function Companion() {
         setTimeout(() => startListeningRef.current?.(), 300);
       }
     }, 900);
-  }, [startSession, stopAllSpeech, unlockAudioPlayback, speechRecognitionSupported]);
+  }, [mode, interviewProfile, startSession, stopAllSpeech, unlockAudioPlayback, speechRecognitionSupported]);
 
   const endCall = useCallback(() => {
     cancelActiveResponse();
@@ -846,6 +1014,7 @@ export default function Companion() {
     setMessages([]);
     setShowFeedback(false);
     setFeedback(null);
+    setAnswerScorecards({});
     setSessionStarted(false);
     sessionStartedRef.current = false;
     interviewQuestionIndexRef.current = 0;
@@ -904,6 +1073,7 @@ export default function Companion() {
     setMessages([]);
     setShowFeedback(false);
     setFeedback(null);
+    setAnswerScorecards({});
     setSessionStarted(false);
     sessionStartedRef.current = false;
     interviewQuestionIndexRef.current = 0;
@@ -1257,34 +1427,75 @@ export default function Companion() {
             {/* Chat messages */}
             <div className="flex-1 overflow-y-auto p-5 space-y-4 min-h-[300px]">
               {!sessionStarted && messages.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-center py-12">
-                  <div className={cn(
-                    "w-20 h-20 rounded-full flex items-center justify-center mb-4",
-                    mode === "interview" ? "bg-indigo-100 text-indigo-600" : "bg-rose-100 text-rose-600"
-                  )}>
-                    <modeInfo.icon className="w-10 h-10" />
+                mode === "interview" ? (
+                  <div className="w-full max-w-xl mx-auto flex flex-col justify-center gap-4 py-4">
+                    <div className="text-center">
+                      <div className="w-14 h-14 mx-auto mb-3 rounded-2xl bg-indigo-100 text-indigo-600 flex items-center justify-center">
+                        <Briefcase className="w-7 h-7" />
+                      </div>
+                      <h3 className="font-display font-bold text-xl text-slate-900">Set up your job-specific interview</h3>
+                      <p className="text-sm text-slate-500 mt-1">Aisha will tailor questions and score each answer for this role.</p>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <label className="block text-left">
+                        <span className="block text-xs font-semibold text-slate-700 mb-1.5">Target job role <span className="text-rose-500">*</span></span>
+                        <input
+                          value={interviewProfile.roleTitle}
+                          onChange={(event) => setInterviewProfile(profile => ({ ...profile, roleTitle: event.target.value.slice(0, 100) }))}
+                          maxLength={100}
+                          placeholder="e.g. Frontend Engineer"
+                          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                        />
+                      </label>
+                      <label className="block text-left">
+                        <span className="block text-xs font-semibold text-slate-700 mb-1.5">Experience level</span>
+                        <select
+                          value={interviewProfile.experienceLevel}
+                          onChange={(event) => setInterviewProfile(profile => ({ ...profile, experienceLevel: event.target.value }))}
+                          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                        >
+                          {["Student / New graduate", "Early career", "Mid-career", "Senior / Leadership"].map(level => (
+                            <option key={level} value={level}>{level}</option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                    <label className="block text-left">
+                      <span className="block text-xs font-semibold text-slate-700 mb-1.5">Job description <span className="font-normal text-slate-400">· optional</span></span>
+                      <textarea
+                        value={interviewProfile.jobDescription}
+                        onChange={(event) => setInterviewProfile(profile => ({ ...profile, jobDescription: event.target.value.slice(0, 3000) }))}
+                        maxLength={3000}
+                        rows={3}
+                        placeholder="Paste responsibilities or key skills to make the questions more specific."
+                        className="w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                      />
+                      <span className="mt-1 block text-right text-[11px] text-slate-400">{interviewProfile.jobDescription.length}/3000</span>
+                    </label>
+                    <p className="text-[11px] text-slate-400 text-center">These details are used for this interview session and aren’t saved to your profile.</p>
+                    <button
+                      onClick={startSession}
+                      disabled={!interviewProfile.roleTitle.trim()}
+                      className="self-center px-6 py-3 rounded-xl font-bold text-white shadow-lg transition-all bg-gradient-to-r from-indigo-600 to-blue-600 shadow-indigo-500/30 hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
+                    >
+                      Start job-specific interview
+                    </button>
                   </div>
-                  <h3 className="font-display font-bold text-xl text-slate-900 mb-2">
-                    {mode === "interview" ? "Ready for your mock interview?" : "Wanna chat with Priya?"}
-                  </h3>
-                  <p className="text-sm text-slate-500 max-w-md mb-6">
-                    {mode === "interview"
-                      ? "Aisha will ask real interview questions one by one and give you feedback on each answer."
-                      : "Priya is your AI bestie — share your day, ask for motivation, or just have a fun chat."
-                    }
-                  </p>
-                  <button
-                    onClick={startSession}
-                    className={cn(
-                      "px-6 py-3 rounded-xl font-bold text-white shadow-lg transition-all hover:scale-105",
-                      mode === "interview"
-                        ? "bg-gradient-to-r from-indigo-600 to-blue-600 shadow-indigo-500/30"
-                        : "bg-gradient-to-r from-rose-500 to-pink-500 shadow-rose-500/30"
-                    )}
-                  >
-                    Start {mode === "interview" ? "Interview" : "Chat"}
-                  </button>
-                </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full text-center py-12">
+                    <div className="w-20 h-20 rounded-full flex items-center justify-center mb-4 bg-rose-100 text-rose-600">
+                      <modeInfo.icon className="w-10 h-10" />
+                    </div>
+                    <h3 className="font-display font-bold text-xl text-slate-900 mb-2">Wanna chat with Priya?</h3>
+                    <p className="text-sm text-slate-500 max-w-md mb-6">Priya is your AI bestie — share your day, ask for motivation, or just have a fun chat.</p>
+                    <button
+                      onClick={startSession}
+                      className="px-6 py-3 rounded-xl font-bold text-white shadow-lg transition-all hover:scale-105 bg-gradient-to-r from-rose-500 to-pink-600 shadow-rose-500/30"
+                    >
+                      Start Chat
+                    </button>
+                  </div>
+                )
               ) : (
                 messages.map(m => (
                   <motion.div
@@ -1301,7 +1512,7 @@ export default function Companion() {
                         {mode === "interview" ? "A" : "P"}
                       </div>
                     )}
-                    <div className="flex max-w-[80%] flex-col items-start gap-1.5">
+                    <div className={cn("flex flex-col items-start gap-1.5", m.role === "user" ? "max-w-[80%]" : "max-w-[96%] md:max-w-[90%]")}>
                       <div className={cn(
                         "rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap",
                         m.role === "user"
@@ -1321,6 +1532,23 @@ export default function Companion() {
                           <Volume2 className="h-3.5 w-3.5" />
                           Read aloud
                         </button>
+                      )}
+                      {m.role === "assistant" && mode === "interview" && answerScorecards[m.id] && (
+                        <AnswerScorecardPanel
+                          entry={answerScorecards[m.id]}
+                          onRetry={() => {
+                            const entry = answerScorecards[m.id];
+                            if (entry) {
+                              void requestAnswerScore(
+                                m.id,
+                                entry.question,
+                                entry.answer,
+                                entry.profile,
+                                sessionGenerationRef.current,
+                              );
+                            }
+                          }}
+                        />
                       )}
                     </div>
                   </motion.div>

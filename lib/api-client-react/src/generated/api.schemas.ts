@@ -137,3 +137,121 @@ export interface SpeakingSessionResult {
   clarityScore: number;
   pacingScore: number;
 }
+
+export type CompanionMessageRole =
+  (typeof CompanionMessageRole)[keyof typeof CompanionMessageRole];
+
+export const CompanionMessageRole = {
+  user: "user",
+  assistant: "assistant",
+} as const;
+
+export interface CompanionMessage {
+  role: CompanionMessageRole;
+  content: string;
+}
+
+export interface CompanionInterviewProfile {
+  /**
+   * @minLength 1
+   * @maxLength 100
+   */
+  roleTitle: string;
+  /**
+   * @minLength 1
+   * @maxLength 80
+   */
+  experienceLevel: string;
+  /** @maxLength 3000 */
+  jobDescription?: string;
+}
+
+export type CompanionRespondInputMode =
+  (typeof CompanionRespondInputMode)[keyof typeof CompanionRespondInputMode];
+
+export const CompanionRespondInputMode = {
+  interview: "interview",
+  friend: "friend",
+} as const;
+
+export type CompanionRespondInputLanguage =
+  (typeof CompanionRespondInputLanguage)[keyof typeof CompanionRespondInputLanguage];
+
+export const CompanionRespondInputLanguage = {
+  english: "english",
+  hindi: "hindi",
+  hinglish: "hinglish",
+} as const;
+
+export interface CompanionRespondInput {
+  mode: CompanionRespondInputMode;
+  history: CompanionMessage[];
+  /** @minLength 1 */
+  message: string;
+  language: CompanionRespondInputLanguage;
+  /**
+   * @minimum 0
+   * @maximum 8
+   */
+  questionIndex?: number;
+  interviewProfile?: CompanionInterviewProfile;
+}
+
+export interface CompanionAnswerScoreInput {
+  /**
+   * @minLength 1
+   * @maxLength 100
+   */
+  roleTitle: string;
+  /**
+   * @minLength 1
+   * @maxLength 80
+   */
+  experienceLevel: string;
+  /** @maxLength 3000 */
+  jobDescription?: string;
+  /**
+   * @minLength 1
+   * @maxLength 500
+   */
+  question: string;
+  /**
+   * @minLength 1
+   * @maxLength 4000
+   */
+  answer: string;
+}
+
+export interface CompanionAnswerScore {
+  /**
+   * @minimum 0
+   * @maximum 100
+   */
+  overallScore: number;
+  /**
+   * @minimum 0
+   * @maximum 100
+   */
+  relevanceScore: number;
+  /**
+   * @minimum 0
+   * @maximum 100
+   */
+  structureScore: number;
+  /**
+   * @minimum 0
+   * @maximum 100
+   */
+  clarityScore: number;
+  /**
+   * @minimum 0
+   * @maximum 100
+   */
+  specificityScore: number;
+  /** @maxLength 320 */
+  summary: string;
+  /** @maxLength 180 */
+  strength: string;
+  /** @maxLength 240 */
+  improvement: string;
+}

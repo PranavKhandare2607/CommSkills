@@ -21,6 +21,8 @@ tags:
     description: User progress tracking
   - name: speaking
     description: Speaking practice sessions
+  - name: companion
+    description: AI companion and interview coach
 paths:
   /healthz:
     get:
@@ -281,6 +283,54 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SpeakingSessionResult"
+
+  /companion/respond:
+    post:
+      operationId: respondCompanion
+      tags: [companion]
+      summary: Stream an AI companion or job-targeted interview response
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompanionRespondInput"
+      responses:
+        "200":
+          description: Server-sent events containing assistant text chunks
+          content:
+            text/event-stream: {}
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenaiError"
+
+  /companion/answer-score:
+    post:
+      operationId: scoreCompanionAnswer
+      tags: [companion]
+      summary: Score one interview answer against its role and question
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompanionAnswerScoreInput"
+      responses:
+        "200":
+          description: Structured scorecard for the answer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanionAnswerScore"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenaiError"
 
 components:
   schemas:
@@ -611,3 +661,131 @@ components:
         - pointsEarned
         - clarityScore
         - pacingScore
+
+    CompanionMessage:
+      type: object
+      properties:
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+      required:
+        - role
+        - content
+
+    CompanionInterviewProfile:
+      type: object
+      properties:
+        roleTitle:
+          type: string
+          minLength: 1
+          maxLength: 100
+        experienceLevel:
+          type: string
+          minLength: 1
+          maxLength: 80
+        jobDescription:
+          type: string
+          maxLength: 3000
+      required:
+        - roleTitle
+        - experienceLevel
+
+    CompanionRespondInput:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum: [interview, friend]
+        history:
+          type: array
+          items:
+            $ref: "#/components/schemas/CompanionMessage"
+        message:
+          type: string
+          minLength: 1
+        language:
+          type: string
+          enum: [english, hindi, hinglish]
+        questionIndex:
+          type: integer
+          minimum: 0
+          maximum: 8
+        interviewProfile:
+          $ref: "#/components/schemas/CompanionInterviewProfile"
+      required:
+        - mode
+        - history
+        - message
+        - language
+
+    CompanionAnswerScoreInput:
+      type: object
+      properties:
+        roleTitle:
+          type: string
+          minLength: 1
+          maxLength: 100
+        experienceLevel:
+          type: string
+          minLength: 1
+          maxLength: 80
+        jobDescription:
+          type: string
+          maxLength: 3000
+        question:
+          type: string
+          minLength: 1
+          maxLength: 500
+        answer:
+          type: string
+          minLength: 1
+          maxLength: 4000
+      required:
+        - roleTitle
+        - experienceLevel
+        - question
+        - answer
+
+    CompanionAnswerScore:
+      type: object
+      properties:
+        overallScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+        relevanceScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+        structureScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+        clarityScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+        specificityScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+        summary:
+          type: string
+          maxLength: 320
+        strength:
+          type: string
+          maxLength: 180
+        improvement:
+          type: string
+          maxLength: 240
+      required:
+        - overallScore
+        - relevanceScore
+        - structureScore
+        - clarityScore
+        - specificityScore
+        - summary
+        - strength
+        - improvement

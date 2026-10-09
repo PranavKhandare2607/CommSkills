@@ -21,6 +21,7 @@ import Talk from "@/pages/Talk";
 import Vocabulary from "@/pages/Vocabulary";
 import Companion from "@/pages/Companion";
 import Resources from "@/pages/Resources";
+import Games from "@/pages/Games";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -180,6 +181,7 @@ function Router() {
       <Route path="/word" component={() => <ProtectedRoute component={Vocabulary} />} />
       <Route path="/companion" component={() => <ProtectedRoute component={Companion} />} />
       <Route path="/resources" component={() => <ProtectedRoute component={Resources} />} />
+      <Route path="/games" component={() => <ProtectedRoute component={Games} />} />
       <Route path="/pricing" component={Pricing} />
       <Route component={NotFound} />
     </Switch>

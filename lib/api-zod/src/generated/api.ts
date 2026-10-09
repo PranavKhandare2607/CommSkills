@@ -243,3 +243,123 @@ export const SaveSpeakingSessionResponse = zod.object({
   clarityScore: zod.number(),
   pacingScore: zod.number(),
 });
+
+/**
+ * @summary Stream an AI companion or job-targeted interview response
+ */
+
+export const respondCompanionBodyQuestionIndexMin = 0;
+export const respondCompanionBodyQuestionIndexMax = 8;
+
+export const respondCompanionBodyInterviewProfileRoleTitleMax = 100;
+
+export const respondCompanionBodyInterviewProfileExperienceLevelMax = 80;
+
+export const respondCompanionBodyInterviewProfileJobDescriptionMax = 3000;
+
+export const RespondCompanionBody = zod.object({
+  mode: zod.enum(["interview", "friend"]),
+  history: zod.array(
+    zod.object({
+      role: zod.enum(["user", "assistant"]),
+      content: zod.string(),
+    }),
+  ),
+  message: zod.string().min(1),
+  language: zod.enum(["english", "hindi", "hinglish"]),
+  questionIndex: zod
+    .number()
+    .min(respondCompanionBodyQuestionIndexMin)
+    .max(respondCompanionBodyQuestionIndexMax)
+    .optional(),
+  interviewProfile: zod
+    .object({
+      roleTitle: zod
+        .string()
+        .min(1)
+        .max(respondCompanionBodyInterviewProfileRoleTitleMax),
+      experienceLevel: zod
+        .string()
+        .min(1)
+        .max(respondCompanionBodyInterviewProfileExperienceLevelMax),
+      jobDescription: zod
+        .string()
+        .max(respondCompanionBodyInterviewProfileJobDescriptionMax)
+        .optional(),
+    })
+    .optional(),
+});
+
+/**
+ * @summary Score one interview answer against its role and question
+ */
+export const scoreCompanionAnswerBodyRoleTitleMax = 100;
+
+export const scoreCompanionAnswerBodyExperienceLevelMax = 80;
+
+export const scoreCompanionAnswerBodyJobDescriptionMax = 3000;
+
+export const scoreCompanionAnswerBodyQuestionMax = 500;
+
+export const scoreCompanionAnswerBodyAnswerMax = 4000;
+
+export const ScoreCompanionAnswerBody = zod.object({
+  roleTitle: zod.string().min(1).max(scoreCompanionAnswerBodyRoleTitleMax),
+  experienceLevel: zod
+    .string()
+    .min(1)
+    .max(scoreCompanionAnswerBodyExperienceLevelMax),
+  jobDescription: zod
+    .string()
+    .max(scoreCompanionAnswerBodyJobDescriptionMax)
+    .optional(),
+  question: zod.string().min(1).max(scoreCompanionAnswerBodyQuestionMax),
+  answer: zod.string().min(1).max(scoreCompanionAnswerBodyAnswerMax),
+});
+
+export const scoreCompanionAnswerResponseOverallScoreMin = 0;
+export const scoreCompanionAnswerResponseOverallScoreMax = 100;
+
+export const scoreCompanionAnswerResponseRelevanceScoreMin = 0;
+export const scoreCompanionAnswerResponseRelevanceScoreMax = 100;
+
+export const scoreCompanionAnswerResponseStructureScoreMin = 0;
+export const scoreCompanionAnswerResponseStructureScoreMax = 100;
+
+export const scoreCompanionAnswerResponseClarityScoreMin = 0;
+export const scoreCompanionAnswerResponseClarityScoreMax = 100;
+
+export const scoreCompanionAnswerResponseSpecificityScoreMin = 0;
+export const scoreCompanionAnswerResponseSpecificityScoreMax = 100;
+
+export const scoreCompanionAnswerResponseSummaryMax = 320;
+
+export const scoreCompanionAnswerResponseStrengthMax = 180;
+
+export const scoreCompanionAnswerResponseImprovementMax = 240;
+
+export const ScoreCompanionAnswerResponse = zod.object({
+  overallScore: zod
+    .number()
+    .min(scoreCompanionAnswerResponseOverallScoreMin)
+    .max(scoreCompanionAnswerResponseOverallScoreMax),
+  relevanceScore: zod
+    .number()
+    .min(scoreCompanionAnswerResponseRelevanceScoreMin)
+    .max(scoreCompanionAnswerResponseRelevanceScoreMax),
+  structureScore: zod
+    .number()
+    .min(scoreCompanionAnswerResponseStructureScoreMin)
+    .max(scoreCompanionAnswerResponseStructureScoreMax),
+  clarityScore: zod
+    .number()
+    .min(scoreCompanionAnswerResponseClarityScoreMin)
+    .max(scoreCompanionAnswerResponseClarityScoreMax),
+  specificityScore: zod
+    .number()
+    .min(scoreCompanionAnswerResponseSpecificityScoreMin)
+    .max(scoreCompanionAnswerResponseSpecificityScoreMax),
+  summary: zod.string().max(scoreCompanionAnswerResponseSummaryMax),
+  strength: zod.string().max(scoreCompanionAnswerResponseStrengthMax),
+  improvement: zod.string().max(scoreCompanionAnswerResponseImprovementMax),
+});

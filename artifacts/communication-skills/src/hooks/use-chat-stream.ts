@@ -27,6 +27,7 @@ export function useChatStream() {
       const res = await fetch(apiUrl("/api/openai/conversations"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ title: "Chat with Buddy" }),
       });
       if (!res.ok) throw new Error("Failed to create conversation");
@@ -64,6 +65,7 @@ export function useChatStream() {
         const response = await fetch(apiUrl(`/api/openai/conversations/${cid}/messages`), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          credentials: "include",
           body: JSON.stringify({ content: trimmed }),
           signal: abortControllerRef.current.signal,
         });
@@ -128,6 +130,7 @@ export function useChatStream() {
           fetch(apiUrl("/api/progress"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
+            credentials: "include",
             body: JSON.stringify({
               type: "ai_coach",
               pointsEarned: 2,

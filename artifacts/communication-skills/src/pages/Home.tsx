@@ -18,7 +18,7 @@ export default function Home() {
       {/* Hero Section */}
       <div className="relative w-full h-[320px] md:h-[400px] overflow-hidden rounded-b-[2.5rem]">
         <img 
-          src={`${import.meta.env.BASE_URL}images/hero-bg.png`} 
+          src={`${import.meta.env.BASE_URL.replace(/\/?$/, "/")}images/hero-bg.png`} 
           alt="Abstract Hero Background" 
           className="absolute inset-0 w-full h-full object-cover"
         />

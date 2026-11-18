@@ -482,6 +482,7 @@ export default function Companion() {
           const res = await fetch(apiUrl("/api/companion/speak"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
+            credentials: "include",
             body: JSON.stringify({ text: clean, language: lang, mode }),
             signal: ctrl.signal,
           });
@@ -894,6 +895,7 @@ export default function Companion() {
       const res = await fetch(apiUrl("/api/companion/respond"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({
           mode,
           history,
@@ -1127,6 +1129,7 @@ export default function Companion() {
       const res = await fetch(apiUrl("/api/companion/feedback"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({
           mode,
           transcript: messages.map(m => ({ role: m.role, content: m.content })),

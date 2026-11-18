@@ -20,6 +20,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Verify API
+        env:
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+        run: |
+          if [ -z "$VITE_API_BASE_URL" ]; then
+            echo "::error::VITE_API_BASE_URL repository variable is not set"
+            exit 1
+          fi
+          for i in 1 2 3 4 5; do
+            if curl -fsS "$VITE_API_BASE_URL/api/healthz"; then exit 0; fi
+            sleep 5
+          done
+          echo "::error::API health check failed for $VITE_API_BASE_URL"
+          exit 1
+
       - uses: actions/setup-node@v4
         with:
           node-version: 24

@@ -244,7 +244,7 @@ const handleSend = useCallback((text: string = input) => {
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-indigo-50 border-2 border-indigo-100 flex items-center justify-center overflow-hidden shrink-0">
             <img
-              src={`${import.meta.env.BASE_URL}images/ai-avatar.png`}
+              src={`${import.meta.env.BASE_URL.replace(/\/?$/, "/")}images/ai-avatar.png`}
               alt="Buddy"
               className="w-full h-full object-cover"
               onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}

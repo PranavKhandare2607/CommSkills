@@ -27,7 +27,7 @@ export function ChatMessage({ role, text }: ChatMessageProps) {
         )}>
           {isBot ? (
             <img 
-              src={`${import.meta.env.BASE_URL}images/ai-avatar.png`} 
+              src={`${import.meta.env.BASE_URL.replace(/\/?$/, "/")}images/ai-avatar.png`} 
               alt="Buddy AI Avatar" 
               className="w-full h-full object-cover rounded-full"
             />

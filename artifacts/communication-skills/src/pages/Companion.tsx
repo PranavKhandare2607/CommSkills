@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { FemaleAvatar } from "@/components/companion/FemaleAvatar";
 import { createLocalSpeechRecognition } from "@/lib/localSpeechRecognition";
 import {
+  apiUrl,
   useScoreCompanionAnswer,
   useUpdateProgress,
   type CompanionAnswerScore,
@@ -478,7 +479,7 @@ export default function Companion() {
         const ctrl = new AbortController();
         ttsAbortRef.current = ctrl;
         try {
-          const res = await fetch("/api/companion/speak", {
+          const res = await fetch(apiUrl("/api/companion/speak"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ text: clean, language: lang, mode }),
@@ -890,7 +891,7 @@ export default function Companion() {
         .filter(m => m.id !== "welcome" && m.content.trim() && !m.content.trim().startsWith("⚠️"))
         .slice(-12)
         .map(m => ({ role: m.role, content: m.content }));
-      const res = await fetch("/api/companion/respond", {
+      const res = await fetch(apiUrl("/api/companion/respond"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1123,7 +1124,7 @@ export default function Companion() {
     try {
       const sessionDuration = Math.round((Date.now() - sessionStartTime.current) / 1000);
       const userMsgCount = messages.filter(m => m.role === "user").length;
-      const res = await fetch("/api/companion/feedback", {
+      const res = await fetch(apiUrl("/api/companion/feedback"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

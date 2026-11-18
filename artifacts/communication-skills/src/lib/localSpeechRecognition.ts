@@ -1,3 +1,5 @@
+import { apiUrl } from "@workspace/api-client-react";
+
 /**
  * Local speech-to-text adapter.
  *
@@ -99,7 +101,7 @@ export function createLocalSpeechRecognition(): LocalSpeechRecognition {
             const formData = new FormData();
             formData.append("file", blob, "recording.webm");
             formData.append("language", rec.lang || "en-IN");
-            const res = await fetch("/api/stt/transcribe", {
+            const res = await fetch(apiUrl("/api/stt/transcribe"), {
               method: "POST",
               body: formData,
               credentials: "include",

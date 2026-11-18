@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { getListOpenaiConversationsQueryKey, getGetProgressQueryKey } from "@workspace/api-client-react";
+import { apiUrl, getListOpenaiConversationsQueryKey, getGetProgressQueryKey } from "@workspace/api-client-react";
 
 export interface Message {
   id: string;
@@ -24,7 +24,7 @@ export function useChatStream() {
   const initConversation = async (): Promise<number | null> => {
     if (conversationId) return conversationId;
     try {
-      const res = await fetch("/api/openai/conversations", {
+      const res = await fetch(apiUrl("/api/openai/conversations"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: "Chat with Buddy" }),
@@ -61,7 +61,7 @@ export function useChatStream() {
         const cid = await initConversation();
         if (!cid) throw new Error("No conversation ID");
 
-        const response = await fetch(`/api/openai/conversations/${cid}/messages`, {
+        const response = await fetch(apiUrl(`/api/openai/conversations/${cid}/messages`), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ content: trimmed }),
@@ -125,7 +125,7 @@ export function useChatStream() {
 
         // Award points for AI coach usage
         if (Math.random() > 0.6) {
-          fetch("/api/progress", {
+          fetch(apiUrl("/api/progress"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({

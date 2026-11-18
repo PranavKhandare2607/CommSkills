@@ -41,7 +41,7 @@ export default function Home() {
             </p>
             
             <div className="mt-8 flex items-center gap-4">
-              <Link href="/ai-assistant">
+              <Link href="/ai-coach">
                 <button className="px-6 py-3 rounded-xl font-semibold bg-indigo-500 hover:bg-indigo-400 text-white shadow-lg shadow-indigo-500/30 transition-all hover:-translate-y-0.5 active:translate-y-0 flex items-center gap-2">
                   <Sparkles className="w-5 h-5" />
                   Chat with AI Coach

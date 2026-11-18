@@ -28,7 +28,7 @@ router.post("/auth/register", async (req: Request, res: Response): Promise<void>
   const passwordHash = await hashPassword(password);
   const [user] = await db.insert(users).values({ email: email.toLowerCase(), passwordHash }).returning({ id: users.id, email: users.email });
   const token = await createSession(user.id);
-  setSessionCookie(res, token);
+  setSessionCookie(res, token, req);
   res.status(201).json({ user: { id: user.id, email: user.email } });
 });
 
@@ -46,14 +46,14 @@ router.post("/auth/login", async (req: Request, res: Response): Promise<void> =>
   }
 
   const token = await createSession(user.id);
-  setSessionCookie(res, token);
+  setSessionCookie(res, token, req);
   res.json({ user: { id: user.id, email: user.email } });
 });
 
 router.post("/auth/logout", async (req: Request, res: Response): Promise<void> => {
   const token = getSessionTokenFromCookie(req.headers.cookie);
   if (token) await revokeSession(token);
-  clearSessionCookie(res);
+  clearSessionCookie(res, req);
   res.status(204).send();
 });
 

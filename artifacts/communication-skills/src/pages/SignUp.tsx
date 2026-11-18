@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import { useAuth } from "@/context/AuthContext";
 
 export default function SignUpPage() {
@@ -90,9 +90,9 @@ export default function SignUpPage() {
           </button>
           <p className="text-center text-sm text-slate-500">
             Already have an account?{" "}
-            <a href="/sign-in" className="text-indigo-600 hover:text-indigo-700 font-medium">
+            <Link href="/sign-in" className="text-indigo-600 hover:text-indigo-700 font-medium">
               Sign in
-            </a>
+            </Link>
           </p>
         </form>
       </div>

@@ -1,4 +1,5 @@
 import { randomBytes, createHash, scryptSync, timingSafeEqual } from "node:crypto";
+import type { Request } from "express";
 import { db, users, sessions, eq, and, gt, isNull } from "@workspace/db";
 
 const SESSION_COOKIE_NAME = "commskills_session";
@@ -67,20 +68,28 @@ export function getSessionTokenFromCookie(cookies: string | undefined): string |
   return match ? decodeURIComponent(match[1]) : null;
 }
 
-export function setSessionCookie(res: any, token: string): void {
+function isSecureRequest(req?: Request): boolean {
+  if (process.env.COOKIE_SECURE === "true") return true;
+  return req?.protocol === "https" || req?.header("x-forwarded-proto") === "https";
+}
+
+export function setSessionCookie(res: any, token: string, req?: Request): void {
+  const secure = isSecureRequest(req);
   res.cookie(SESSION_COOKIE_NAME, token, {
     httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.COOKIE_SECURE === "true",
+    sameSite: secure ? "none" : "lax",
+    secure,
     path: "/",
     maxAge: SESSION_TTL_MS,
   });
 }
 
-export function clearSessionCookie(res: any): void {
+export function clearSessionCookie(res: any, req?: Request): void {
+  const secure = isSecureRequest(req);
   res.clearCookie(SESSION_COOKIE_NAME, {
     httpOnly: true,
-    sameSite: "lax",
+    sameSite: secure ? "none" : "lax",
+    secure,
     path: "/",
   });
 }

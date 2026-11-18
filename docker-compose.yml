@@ -98,6 +98,16 @@ services:
       retries: 10
       start_period: 120s
 
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    command: ["tunnel", "--url", "http://api:8080", "--metrics", "0.0.0.0:2000"]
+    ports:
+      - "2001:2000"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   pgdata:
   stt-cache:

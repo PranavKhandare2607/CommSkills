@@ -31,7 +31,7 @@ const queryClient = new QueryClient({
   },
 });
 
-const basePath = import.meta.env.BASE_PATH?.replace(/\/$/, "") ?? "";
+const basePath = (import.meta.env.BASE_URL || import.meta.env.BASE_PATH || "/").replace(/\/$/, "");
 
 function HomeRedirect() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -75,7 +75,11 @@ function Router() {
 function AppRoutes() {
   const [, setLocation] = useLocation();
   useEffect(() => {
-    setLocation(window.location.pathname);
+    const pathname = window.location.pathname;
+    const relative = basePath && pathname.startsWith(basePath)
+      ? pathname.slice(basePath.length)
+      : pathname;
+    setLocation(relative || "/");
   }, [setLocation]);
 
   return (

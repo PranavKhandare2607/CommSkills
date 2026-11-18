@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { db, userProgressTable, activityLogTable } from "@workspace/db";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, gte } from "drizzle-orm";
 import { UpdateProgressBody } from "@workspace/api-zod";
 import { requireAuth } from "../middlewares/requireAuth";
 
@@ -36,6 +36,68 @@ async function getOrCreateProgress(userId: string) {
   return existing;
 }
 
+const MONTH_LABELS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/**
+ * Aggregate the last 7 months of this user's activity into chart data.
+ * Returns real values (0 when there is no activity) instead of fake numbers.
+ */
+async function buildHistory(userId: string) {
+  const now = new Date();
+  const since = new Date(now.getFullYear(), now.getMonth() - 6, 1);
+
+  const rows = await db
+    .select()
+    .from(activityLogTable)
+    .where(
+      and(
+        eq(activityLogTable.userId, userId),
+        gte(activityLogTable.createdAt, since),
+      ),
+    );
+
+  const buckets = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - 6 + i, 1);
+    return {
+      key: `${d.getFullYear()}-${d.getMonth()}`,
+      name: MONTH_LABELS[d.getMonth()],
+      grammarSum: 0,
+      grammarCount: 0,
+      vocabulary: 0,
+    };
+  });
+
+  for (const row of rows) {
+    const d = new Date(row.createdAt);
+    const bucket = buckets.find(
+      (b) => b.key === `${d.getFullYear()}-${d.getMonth()}`,
+    );
+    if (!bucket) continue;
+    if (row.type === "grammar" && row.accuracy != null) {
+      bucket.grammarSum += row.accuracy;
+      bucket.grammarCount += 1;
+    }
+    if (row.type === "vocabulary") {
+      bucket.vocabulary += 1;
+    }
+  }
+
+  return {
+    grammarHistory: buckets.map((b) => ({
+      name: b.name,
+      score:
+        b.grammarCount > 0 ? Math.round(b.grammarSum / b.grammarCount) : 0,
+    })),
+    vocabularyHistory: buckets.map((b) => ({
+      name: b.name,
+      score: b.vocabulary,
+    })),
+  };
+}
+
 // GET /progress
 router.get("/progress", requireAuth, async (req, res) => {
   const userId = (req as typeof req & { userId: string }).userId;
@@ -49,22 +111,7 @@ router.get("/progress", requireAuth, async (req, res) => {
     .orderBy(desc(activityLogTable.createdAt))
     .limit(10);
 
-  // Build grammar history (last 7 data points from activities)
-  const grammarActivities = await db
-    .select()
-    .from(activityLogTable)
-    .orderBy(desc(activityLogTable.createdAt))
-    .limit(50);
-
-  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul"];
-  const grammarHistory = months.map((name, i) => ({
-    name,
-    score: Math.min(95, 65 + i * 5 + Math.round(Math.random() * 3)),
-  }));
-  const vocabularyHistory = months.map((name, i) => ({
-    name,
-    score: Math.min(40, 12 + i * 4 + Math.round(Math.random() * 2)),
-  }));
+  const { grammarHistory, vocabularyHistory } = await buildHistory(userId);
 
   res.json({
     points: progress.points,
@@ -112,6 +159,7 @@ router.post("/progress", requireAuth, async (req, res) => {
   const [updated] = await db
     .update(userProgressTable)
     .set(updates)
+    .where(eq(userProgressTable.userId, userId))
     .returning();
 
   // Log activity
@@ -131,15 +179,7 @@ router.post("/progress", requireAuth, async (req, res) => {
     .orderBy(desc(activityLogTable.createdAt))
     .limit(10);
 
-  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul"];
-  const grammarHistory = months.map((name, i) => ({
-    name,
-    score: Math.min(95, 65 + i * 5),
-  }));
-  const vocabularyHistory = months.map((name, i) => ({
-    name,
-    score: Math.min(40, 12 + i * 4),
-  }));
+  const { grammarHistory, vocabularyHistory } = await buildHistory(userId);
 
   res.json({
     points: updated.points,

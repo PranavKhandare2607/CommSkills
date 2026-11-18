@@ -1,0 +1,104 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      # Exposed so a non-Docker frontend can proxy to http://localhost:8080.
+      - "8080:8080"
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+      DATABASE_URL: ${DATABASE_URL:-postgresql://commskills:commskills@db:5432/commskills}
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:11434/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-ollama}
+      LLM_CHAT_MODEL: ${LLM_CHAT_MODEL:-qwen3-coder:30b}
+      LLM_REQUEST_TIMEOUT_MS: ${LLM_REQUEST_TIMEOUT_MS:-600000}
+      LOCAL_PREMIUM_MODE: ${LOCAL_PREMIUM_MODE:-true}
+      SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-commskills_session}
+      SESSION_TTL_DAYS: ${SESSION_TTL_DAYS:-30}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      STT_BASE_URL: ${STT_BASE_URL:-http://stt:8080}
+      TTS_BASE_URL: ${TTS_BASE_URL:-http://tts:8080}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    # Lets the container reach the host Ollama. Works natively on Docker
+    # Desktop (Windows); host-gateway makes it portable on Linux too.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8080/api/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: commskills
+      POSTGRES_PASSWORD: commskills
+      POSTGRES_DB: commskills
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U commskills -d commskills"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  stt:
+    build:
+      context: ./services/stt
+    environment:
+      PORT: 8080
+      STT_MODEL: ${STT_MODEL:-base}
+      STT_DEVICE: ${STT_DEVICE:-cpu}
+      STT_COMPUTE_TYPE: ${STT_COMPUTE_TYPE:-int8}
+    volumes:
+      - stt-cache:/root/.cache
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 180s
+
+  tts:
+    build:
+      context: ./services/tts
+    environment:
+      PORT: 8080
+      VOICES_DIR: /voices
+      TTS_VOICE_EN: ${TTS_VOICE_EN:-en_US-amy-medium}
+      TTS_VOICE_HI: ${TTS_VOICE_HI:-hi_IN-priyamvada-medium}
+    volumes:
+      - tts-voices:/voices
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 120s
+
+volumes:
+  pgdata:
+  stt-cache:
+  tts-voices:

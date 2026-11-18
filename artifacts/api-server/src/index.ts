@@ -1,13 +1,8 @@
 import app from "./app";
 import { logger } from "./lib/logger";
+import { runMigrations } from "@workspace/db/migrate";
 
-const rawPort = process.env["PORT"];
-
-if (!rawPort) {
-  throw new Error(
-    "PORT environment variable is required but was not provided.",
-  );
-}
+const rawPort = process.env["PORT"] ?? "8080";
 
 const port = Number(rawPort);
 
@@ -15,11 +10,19 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-app.listen(port, (err) => {
-  if (err) {
-    logger.error({ err }, "Error listening on port");
+// Apply Drizzle migrations once at startup. Re-runs are safe: completed
+// migrations are tracked in the drizzle_migrations table.
+runMigrations()
+  .then(() => {
+    app.listen(port, "0.0.0.0", (err) => {
+      if (err) {
+        logger.error({ err }, "Error listening on port");
+        process.exit(1);
+      }
+      logger.info({ port }, "Server listening");
+    });
+  })
+  .catch((err) => {
+    logger.error({ err }, "Database migration failed, not starting server");
     process.exit(1);
-  }
-
-  logger.info({ port }, "Server listening");
-});
+  });

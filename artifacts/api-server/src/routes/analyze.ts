@@ -1,8 +1,8 @@
 import { Router, type IRouter } from "express";
-import { openai } from "@workspace/integrations-openai-ai-server";
 import { AnalyzeCommunicationBody } from "@workspace/api-zod";
 import { requireAuth } from "../middlewares/requireAuth";
 import { checkLockedFeatureAccess } from "../lib/subscriptionUtils";
+import { chatJson } from "../lib/llm";
 
 const router: IRouter = Router();
 
@@ -16,13 +16,8 @@ router.post("/analyze", requireAuth, async (req, res) => {
   const body = AnalyzeCommunicationBody.parse(req.body);
 
   try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-5.2",
-      max_completion_tokens: 8192,
-      messages: [
-        {
-          role: "system",
-          content: `You are an expert communication analyst. Analyze the given text based on the 7 C's of Communication and return a JSON response with exactly these fields:
+    const result = await chatJson({
+      system: `You are an expert communication analyst. Analyze the given text based on the 7 C's of Communication and return a JSON response with exactly these fields:
 {
   "overallScore": number 0-100,
   "clarityScore": number 0-100,
@@ -35,29 +30,25 @@ router.post("/analyze", requireAuth, async (req, res) => {
   "improvements": ["specific improvement 1", "specific improvement 2", "specific improvement 3"]
 }
 Be constructive and specific. Analyze each C of Communication separately.`,
-        },
+      messages: [
         {
           role: "user",
           content: `Analyze this communication text:\n\n${body.text}`,
         },
       ],
-      response_format: { type: "json_object" },
+      maxTokens: 2048,
     });
 
-    const result = JSON.parse(
-      response.choices[0]?.message?.content ?? "{}",
-    );
-
     res.json({
-      overallScore: result.overallScore ?? 70,
-      clarityScore: result.clarityScore ?? 70,
-      conciseness: result.conciseness ?? 70,
-      concreteness: result.concreteness ?? 70,
-      correctness: result.correctness ?? 70,
-      courtesy: result.courtesy ?? 70,
-      grammarScore: result.grammarScore ?? 70,
-      feedback: result.feedback ?? "Analysis complete.",
-      improvements: result.improvements ?? [],
+      overallScore: (result as any).overallScore ?? 70,
+      clarityScore: (result as any).clarityScore ?? 70,
+      conciseness: (result as any).conciseness ?? 70,
+      concreteness: (result as any).concreteness ?? 70,
+      correctness: (result as any).correctness ?? 70,
+      courtesy: (result as any).courtesy ?? 70,
+      grammarScore: (result as any).grammarScore ?? 70,
+      feedback: (result as any).feedback ?? "Analysis complete.",
+      improvements: (result as any).improvements ?? [],
     });
   } catch (err) {
     res.status(500).json({ error: "Communication analysis failed" });

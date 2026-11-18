@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FemaleAvatar } from "@/components/companion/FemaleAvatar";
+import { createLocalSpeechRecognition } from "@/lib/localSpeechRecognition";
 import {
   useScoreCompanionAnswer,
   useUpdateProgress,
@@ -226,6 +227,11 @@ export default function Companion() {
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const speechRecognitionSupported =
+    typeof window !== "undefined" &&
+    typeof MediaRecorder !== "undefined" &&
+    typeof navigator !== "undefined" &&
+    !!navigator.mediaDevices?.getUserMedia;
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
@@ -244,6 +250,8 @@ export default function Companion() {
   const [voiceMode, setVoiceMode] = useState(false);
   const [inIframe, setInIframe] = useState(false);
   const [bannerDismissed, setBannerDismissed] = useState(false);
+  void inIframe;
+  void bannerDismissed;
   const [language, setLanguage] = useState<"english" | "hindi" | "hinglish">("english");
   const languageRef = useRef<"english" | "hindi" | "hinglish">("english");
   useEffect(() => { languageRef.current = language; }, [language]);
@@ -254,11 +262,7 @@ export default function Companion() {
   const [callSeconds, setCallSeconds] = useState(0);
   const callTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const callStartTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // iOS Safari / most mobile browsers don't implement SpeechRecognition at all —
-  // detect once so we can show a working fallback instead of a dead mic button.
-  const [speechRecognitionSupported] = useState<boolean>(
-    () => typeof window !== "undefined" && !!((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)
-  );
+
   const [callInput, setCallInput] = useState("");
   const sessionStartedRef = useRef(false);
 
@@ -664,9 +668,8 @@ export default function Companion() {
   // SPEECH RECOGNITION
   // ============================================================
   const startListening = useCallback(async () => {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) {
-      alert("Voice input isn't supported. Try Chrome, Edge, or Safari.");
+    if (!speechRecognitionSupported) {
+      alert("Voice input isn't supported in this browser. Please type instead.");
       return;
     }
     try {
@@ -682,7 +685,7 @@ export default function Companion() {
     }
     stopAllSpeech();
 
-    const recognition = new SR();
+    const recognition = createLocalSpeechRecognition();
     recognitionRef.current = recognition;
     // Use the user's selected language for speech recognition.
     // Hindi → hi-IN. Hinglish → en-IN (better for Roman-script speakers who mix Hindi+English).
@@ -752,9 +755,9 @@ export default function Companion() {
     }
   }, [voiceMode]);
 
-  const stopListening = useCallback(() => {
+  const stopListening = useCallback((discard = false) => {
     const recognition = recognitionRef.current;
-    if (recognition && isListeningRef.current) {
+    if (recognition && isListeningRef.current && discard) {
       recognition.__commSkillsDiscardResult = true;
     }
     recognition?.stop();
@@ -767,7 +770,7 @@ export default function Companion() {
     voiceModeRef.current = next;
     setVoiceMode(next);
     if (!next) {
-      stopListening();
+      stopListening(true);
     } else if (sessionStartedRef.current && !isSpeakingRef.current && !isStreamingRef.current) {
       void startListening();
     }
@@ -1056,7 +1059,7 @@ export default function Companion() {
   const endCall = useCallback(() => {
     cancelActiveResponse();
     stopAllSpeech();
-    stopListening();
+    stopListening(true);
     setIsCallActive(false);
     setVoiceMode(false);
     voiceModeRef.current = false;
@@ -1094,7 +1097,7 @@ export default function Companion() {
     if (newMode === mode) return;
     cancelActiveResponse();
     stopAllSpeech();
-    stopListening();
+    stopListening(true);
     setIsCallActive(false);
     setVoiceMode(false);
     voiceModeRef.current = false;
@@ -1653,7 +1656,7 @@ export default function Companion() {
               <div className="p-4 border-t border-slate-200 bg-slate-50">
                 <div className="flex items-end gap-2 mb-2">
                   <button
-                    onClick={isListening ? stopListening : startListening}
+                    onClick={isListening ? () => stopListening() : () => void startListening()}
                     disabled={isStreaming}
                     className={cn(
                       "p-3 rounded-xl shadow-md transition-all shrink-0",

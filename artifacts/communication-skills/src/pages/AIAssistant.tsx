@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { ChatMessage } from "@/components/chat/ChatMessage";
 import { useChatStream } from "@/hooks/use-chat-stream";
+import { useLocalRecorder } from "@/hooks/useLocalRecorder";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 
@@ -120,42 +121,31 @@ const COLOR_MAP: Record<string, { tab: string; prompt: string; dot: string }> = 
 export default function AIAssistant() {
   const { messages, isGenerating, sendMessage, stopGeneration, clearChat } = useChatStream();
   const [input, setInput] = useState("");
-  const [isListening, setIsListening] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [activeCategory, setActiveCategory] = useState("communication");
   const [showAllPrompts, setShowAllPrompts] = useState(false);
   const [voiceMode, setVoiceMode] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const recognitionRef = useRef<any>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lastSpokenIdRef = useRef<string>("");
+
+  const { state, transcript, isRecording, startRecording, stopRecording, toggleRecording } = useLocalRecorder({
+    onTranscript: (text) => {
+      setInput(text);
+      if (voiceMode) {
+        setTimeout(() => handleSend(text.trim()), 300);
+      }
+    },
+    onError: (message) => {
+      alert(message);
+    },
+    language: "en-IN",
+  });
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  // Auto-resize textarea
-  useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 128) + "px";
-    }
-  }, [input]);
-
-  // Preload voices — getVoices() returns empty initially in many browsers until voiceschanged fires
-  useEffect(() => {
-    const loadVoices = () => window.speechSynthesis.getVoices();
-    loadVoices();
-    window.speechSynthesis.onvoiceschanged = loadVoices;
-    return () => { window.speechSynthesis.onvoiceschanged = null; };
-  }, []);
-
-  // TTS for Buddy's responses
   useEffect(() => {
     if (isMuted || isGenerating) return;
     const lastMsg = messages[messages.length - 1];
@@ -207,7 +197,7 @@ export default function AIAssistant() {
     window.speechSynthesis.speak(utterance);
   }, []);
 
-  const handleSend = useCallback((text: string = input) => {
+const handleSend = useCallback((text: string = input) => {
     const trimmed = text.trim();
     if (!trimmed || isGenerating) return;
     window.speechSynthesis.cancel();
@@ -216,115 +206,21 @@ export default function AIAssistant() {
     if (textareaRef.current) textareaRef.current.style.height = "auto";
   }, [input, isGenerating, sendMessage]);
 
-  const startListening = useCallback(async () => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      alert("Voice recognition isn't supported in this browser. Please use Chrome, Edge, or Safari.");
-      return;
-    }
-
-    // Explicitly request microphone permission first — this triggers the browser permission prompt
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      // Immediately release the mic — SpeechRecognition will reopen it
-      stream.getTracks().forEach(t => t.stop());
-    } catch (err: any) {
-      console.error("Mic permission error:", err);
-      if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-        alert("Microphone access was blocked. Please click the 🔒 lock icon in your browser's address bar and allow microphone access, then try again.\n\nIf you're viewing this in Replit's preview pane, click the 'Open in new tab' button above the preview to enable mic access.");
-      } else if (err.name === "NotFoundError") {
-        alert("No microphone was found. Please connect a microphone and try again.");
-      } else {
-        alert(`Could not access microphone: ${err.message || err.name}\n\nTry opening this app in a new tab.`);
-      }
-      return;
-    }
-
-    window.speechSynthesis.cancel();
-
-    const recognition = new SpeechRecognition();
-    recognitionRef.current = recognition;
-    recognition.lang = "en-IN";
-    recognition.interimResults = true;
-    recognition.continuous = false;
-    recognition.maxAlternatives = 1;
-
-    let finalTranscript = "";
-    let interimTranscript = "";
-
-    recognition.onstart = () => {
-      setIsListening(true);
-      finalTranscript = "";
-      interimTranscript = "";
-    };
-
-    recognition.onresult = (event: any) => {
-      finalTranscript = "";
-      interimTranscript = "";
-      for (let i = 0; i < event.results.length; i++) {
-        if (event.results[i].isFinal) {
-          finalTranscript += event.results[i][0].transcript;
-        } else {
-          interimTranscript += event.results[i][0].transcript;
-        }
-      }
-      setInput(finalTranscript || interimTranscript);
-    };
-
-    recognition.onerror = (event: any) => {
-      console.warn("Speech recognition error:", event.error);
-      setIsListening(false);
-      if (event.error === "not-allowed" || event.error === "service-not-allowed") {
-        alert("Microphone permission denied. Please allow microphone access in your browser settings and try again.");
-      } else if (event.error === "no-speech" || event.error === "aborted") {
-        // silent — user didn't speak or stopped manually
-      } else if (event.error === "network") {
-        // The Web Speech API in Chrome/Edge sends audio to Google's servers in the background.
-        // This is blocked when the page is loaded inside Replit's preview iframe.
-        // The fix is to open the app in a new tab (full URL) where the speech service can be reached.
-        const inIframe = window.self !== window.top;
-        if (inIframe) {
-          alert("Voice input is blocked inside the preview pane.\n\n✅ FIX: Click the 'Open in new tab' button (↗ icon) at the top of the preview pane to open this app in its own tab. The mic will work there.\n\n(This is a browser security restriction — Web Speech API requires a top-level page, not an embedded iframe.)");
-        } else {
-          alert("Voice input couldn't reach the speech recognition service. Please try again, or use a different browser like Chrome or Edge.");
-        }
-      }
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-      // Auto-send in voice mode if we have a transcript
-      if (voiceMode && finalTranscript.trim()) {
-        setTimeout(() => handleSend(finalTranscript.trim()), 300);
-      }
-    };
-
-    try {
-      recognition.start();
-    } catch (err) {
-      console.error("Failed to start recognition:", err);
-      setIsListening(false);
-    }
-  }, [voiceMode, handleSend]);
-
-  const stopListening = useCallback(() => {
-    recognitionRef.current?.stop();
-    setIsListening(false);
-  }, []);
-
-  const toggleListening = useCallback(() => {
-    if (isListening) {
-      stopListening();
-    } else {
-      startListening();
-    }
-  }, [isListening, startListening, stopListening]);
-
   const toggleMute = useCallback(() => {
     window.speechSynthesis.cancel();
     setIsSpeaking(false);
     setIsMuted(prev => !prev);
   }, []);
+
+  const toggleVoiceMode = useCallback(() => {
+    const next = !voiceMode;
+    setVoiceMode(next);
+    if (!next) {
+      stopRecording();
+    } else if (!isGenerating) {
+      void startRecording();
+    }
+  }, [voiceMode, isGenerating, startRecording, stopRecording]);
 
   const activeCat = TOPIC_CATEGORIES.find(c => c.id === activeCategory) || TOPIC_CATEGORIES[0];
   const colors = COLOR_MAP[activeCat.color] || COLOR_MAP["indigo"];
@@ -342,32 +238,6 @@ export default function AIAssistant() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-64px)] md:h-screen bg-slate-50">
-      {/* Iframe warning banner — voice features need a top-level page */}
-      {showIframeBanner && (
-        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2.5 flex items-center justify-between gap-3 shrink-0">
-          <div className="flex items-center gap-2 text-sm text-amber-900 min-w-0">
-            <Mic className="w-4 h-4 shrink-0 text-amber-600" />
-            <span className="truncate">
-              <strong>Voice features need a new tab.</strong> The mic is blocked inside this preview pane.
-            </span>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={openInNewTab}
-              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-600 text-white hover:bg-amber-700 transition-colors"
-            >
-              Open in new tab ↗
-            </button>
-            <button
-              onClick={() => setBannerDismissed(true)}
-              className="text-xs text-amber-700 hover:text-amber-900 px-2 py-1"
-              title="Dismiss"
-            >
-              ✕
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Header */}
       <div className="bg-white px-4 md:px-6 py-3 border-b border-slate-200 flex items-center justify-between shrink-0 shadow-sm">
@@ -528,7 +398,7 @@ export default function AIAssistant() {
           )}
 
           {/* Listening indicator */}
-          {isListening && (
+          {isRecording && (
             <div className="mb-2 flex items-center gap-2 text-rose-600 text-xs font-medium">
               <span className="w-2 h-2 bg-rose-500 rounded-full animate-pulse" />
               Listening... speak clearly, then stop to send
@@ -539,23 +409,23 @@ export default function AIAssistant() {
           {/* Input box */}
           <div className={cn(
             "flex items-end gap-2 rounded-2xl border p-2 transition-all",
-            isListening
+            isRecording
               ? "bg-rose-50 border-rose-300 ring-4 ring-rose-500/10"
               : "bg-slate-50 border-slate-200 focus-within:border-indigo-400 focus-within:ring-4 focus-within:ring-indigo-500/10"
           )}>
             {/* Mic button */}
             <button
-              onClick={toggleListening}
+              onClick={toggleRecording}
               disabled={isGenerating}
-              title={isListening ? "Stop listening" : voiceMode ? "Speak (auto-sends)" : "Voice input"}
+              title={isRecording ? "Stop listening" : voiceMode ? "Speak (auto-sends)" : "Voice input"}
               className={cn(
                 "p-3 rounded-xl transition-all shrink-0 relative",
-                isListening
+                isRecording
                   ? "bg-rose-500 text-white shadow-lg shadow-rose-500/30 scale-110"
                   : "bg-white text-slate-400 hover:bg-slate-100 hover:text-indigo-600 border border-slate-200 shadow-sm disabled:opacity-40"
               )}
             >
-              {isListening ? (
+              {isRecording ? (
                 <>
                   <MicOff className="w-5 h-5" />
                   <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-rose-400 rounded-full animate-ping" />
@@ -577,7 +447,7 @@ export default function AIAssistant() {
                 }
               }}
               placeholder={
-                isListening
+                isRecording
                   ? "Listening... speak now 🎙️"
                   : voiceMode
                   ? "Voice Mode ON — click mic and speak, I'll answer! 🎤"
@@ -600,7 +470,7 @@ export default function AIAssistant() {
             ) : (
               <button
                 onClick={() => handleSend()}
-                disabled={!input.trim() && !isListening}
+                disabled={!input.trim() && !isRecording}
                 title="Send"
                 className="p-3 rounded-xl bg-indigo-600 text-white shadow-md shadow-indigo-600/20 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all shrink-0 active:scale-95"
               >

@@ -1,0 +1,42 @@
+# ---- Build stage ----
+FROM node:24-alpine AS builder
+WORKDIR /app
+
+# Workspace manifests only (keeps dependency install cached and satisfies the
+# frozen lockfile, which lists every workspace importer).
+COPY pnpm-workspace.yaml pnpm-lock.yaml package.json .npmrc ./
+COPY artifacts/api-server/package.json artifacts/api-server/
+COPY artifacts/communication-skills/package.json artifacts/communication-skills/
+COPY artifacts/mockup-sandbox/package.json artifacts/mockup-sandbox/
+COPY lib/api-zod/package.json lib/api-zod/
+COPY lib/api-client-react/package.json lib/api-client-react/
+COPY lib/api-spec/package.json lib/api-spec/
+COPY lib/db/package.json lib/db/
+COPY lib/integrations-openai-ai-server/package.json lib/integrations-openai-ai-server/
+COPY lib/integrations-openai-ai-react/package.json lib/integrations-openai-ai-react/
+COPY scripts/package.json scripts/
+
+RUN corepack enable && corepack prepare pnpm@10.34.6 --activate
+RUN pnpm install --frozen-lockfile
+
+COPY tsconfig.base.json tsconfig.json ./
+COPY artifacts/api-server/ artifacts/api-server/
+COPY lib/ lib/
+
+RUN pnpm --filter @workspace/api-server run build
+
+# ---- Production stage ----
+FROM node:24-alpine
+WORKDIR /app
+
+ENV NODE_ENV=production
+# Migrations are resolved from here by lib/db/src/migrate.ts (run at startup).
+ENV MIGRATIONS_DIR=/app/drizzle
+
+# esbuild produces a self-contained ESM bundle; only dist + SQL migrations are
+# needed at runtime.
+COPY --from=builder /app/artifacts/api-server/dist ./dist
+COPY --from=builder /app/lib/db/drizzle ./drizzle
+
+EXPOSE 8080
+CMD ["node", "--enable-source-maps", "./dist/index.mjs"]

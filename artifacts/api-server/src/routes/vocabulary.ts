@@ -1,8 +1,8 @@
 import { Router, type IRouter } from "express";
-import { openai } from "@workspace/integrations-openai-ai-server";
 import { LookupVocabularyBody } from "@workspace/api-zod";
 import { requireAuth } from "../middlewares/requireAuth";
 import { checkAndIncrementUsage } from "../lib/subscriptionUtils";
+import { chatJson } from "../lib/llm";
 
 const router: IRouter = Router();
 
@@ -16,13 +16,8 @@ router.post("/vocabulary/lookup", requireAuth, async (req, res) => {
   const body = LookupVocabularyBody.parse(req.body);
 
   try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-5.2",
-      max_completion_tokens: 8192,
-      messages: [
-        {
-          role: "system",
-          content: `You are a dictionary and vocabulary expert. Look up the given word and return a JSON response with exactly these fields:
+    const result = await chatJson({
+      system: `You are a dictionary and vocabulary expert. Look up the given word and return a JSON response with exactly these fields:
 {
   "found": true,
   "word": "the word",
@@ -39,26 +34,22 @@ router.post("/vocabulary/lookup", requireAuth, async (req, res) => {
 }
 If the word doesn't exist or is not a real word, set "found" to false and provide empty arrays.
 Provide 1-3 definitions. Always include the pronunciation in standard IPA notation.`,
-        },
+      messages: [
         {
           role: "user",
           content: `Look up this word: ${body.word}`,
         },
       ],
-      response_format: { type: "json_object" },
+      maxTokens: 2048,
     });
 
-    const result = JSON.parse(
-      response.choices[0]?.message?.content ?? "{}",
-    );
-
     res.json({
-      found: result.found ?? false,
-      word: result.word ?? body.word,
-      pronunciation: result.pronunciation ?? "",
-      definitions: result.definitions ?? [],
-      synonyms: result.synonyms ?? [],
-      antonyms: result.antonyms ?? [],
+      found: (result as any).found ?? false,
+      word: (result as any).word ?? body.word,
+      pronunciation: (result as any).pronunciation ?? "",
+      definitions: (result as any).definitions ?? [],
+      synonyms: (result as any).synonyms ?? [],
+      antonyms: (result as any).antonyms ?? [],
     });
   } catch (err) {
     res.status(500).json({ error: "Vocabulary lookup failed" });

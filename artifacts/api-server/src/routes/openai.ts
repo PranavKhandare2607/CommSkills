@@ -1,11 +1,9 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
+import { and, desc, eq } from "drizzle-orm";
 import { db, conversations, messages } from "@workspace/db";
-import { eq, desc } from "drizzle-orm";
-import { openai } from "@workspace/integrations-openai-ai-server";
-import {
-  CreateOpenaiConversationBody,
-  SendOpenaiMessageBody,
-} from "@workspace/api-zod";
+import { CreateOpenaiConversationBody, SendOpenaiMessageBody } from "@workspace/api-zod";
+import { streamChat, LlmUnavailableError } from "../lib/llm";
+import { requireAuth, type AuthedRequest } from "../middlewares/requireAuth";
 
 const router: IRouter = Router();
 
@@ -78,32 +76,44 @@ const BUDDY_SYSTEM_PROMPT = `You are Buddy, a highly knowledgeable, friendly, an
 - If asked to solve math, show every step clearly
 - If the topic is outside communication skills, help anyway — you are a universal assistant`;
 
-// GET /openai/conversations
-router.get("/openai/conversations", async (req, res) => {
-  const convs = await db
+function ownConv(req: Request, convId: number) {
+  return and(
+    eq(conversations.id, convId),
+    eq(conversations.userId, (req as AuthedRequest).userId),
+  );
+}
+
+function idFrom(req: Request): number {
+  return Number.parseInt(String(req.params.id), 10);
+}
+
+// GET /api/openai/conversations
+router.get("/openai/conversations", requireAuth, async (req, res) => {
+  const rows = await db
     .select()
     .from(conversations)
+    .where(eq(conversations.userId, (req as AuthedRequest).userId))
     .orderBy(desc(conversations.createdAt));
-  res.json(convs);
+  res.json(rows);
 });
 
-// POST /openai/conversations
-router.post("/openai/conversations", async (req, res) => {
+// POST /api/openai/conversations
+router.post("/openai/conversations", requireAuth, async (req, res) => {
   const body = CreateOpenaiConversationBody.parse(req.body);
   const [conv] = await db
     .insert(conversations)
-    .values({ title: body.title })
+    .values({ title: body.title, userId: (req as AuthedRequest).userId })
     .returning();
   res.status(201).json(conv);
 });
 
-// GET /openai/conversations/:id
-router.get("/openai/conversations/:id", async (req, res) => {
-  const id = parseInt(req.params.id);
+// GET /api/openai/conversations/:id
+router.get("/openai/conversations/:id", requireAuth, async (req, res) => {
+  const id = idFrom(req);
   const [conv] = await db
     .select()
     .from(conversations)
-    .where(eq(conversations.id, id));
+    .where(ownConv(req, id));
   if (!conv) {
     res.status(404).json({ error: "Conversation not found" });
     return;
@@ -116,24 +126,29 @@ router.get("/openai/conversations/:id", async (req, res) => {
   res.json({ ...conv, messages: msgs });
 });
 
-// DELETE /openai/conversations/:id
-router.delete("/openai/conversations/:id", async (req, res) => {
-  const id = parseInt(req.params.id);
-  await db.delete(messages).where(eq(messages.conversationId, id));
+// DELETE /api/openai/conversations/:id
+router.delete("/openai/conversations/:id", requireAuth, async (req, res) => {
+  const id = idFrom(req);
   const deleted = await db
     .delete(conversations)
-    .where(eq(conversations.id, id))
+    .where(ownConv(req, id))
     .returning();
   if (!deleted.length) {
     res.status(404).json({ error: "Conversation not found" });
     return;
   }
+  // messages cascade via FK
   res.status(204).send();
 });
 
-// GET /openai/conversations/:id/messages
-router.get("/openai/conversations/:id/messages", async (req, res) => {
-  const id = parseInt(req.params.id);
+// GET /api/openai/conversations/:id/messages
+router.get("/openai/conversations/:id/messages", requireAuth, async (req, res) => {
+  const id = idFrom(req);
+  const [conv] = await db.select().from(conversations).where(ownConv(req, id));
+  if (!conv) {
+    res.status(404).json({ error: "Conversation not found" });
+    return;
+  }
   const msgs = await db
     .select()
     .from(messages)
@@ -142,10 +157,16 @@ router.get("/openai/conversations/:id/messages", async (req, res) => {
   res.json(msgs);
 });
 
-// POST /openai/conversations/:id/messages (SSE streaming)
-router.post("/openai/conversations/:id/messages", async (req, res) => {
-  const id = parseInt(req.params.id);
+// POST /api/openai/conversations/:id/messages (SSE streaming)
+router.post("/openai/conversations/:id/messages", requireAuth, async (req, res) => {
+  const id = idFrom(req);
   const body = SendOpenaiMessageBody.parse(req.body);
+
+  const [conv] = await db.select().from(conversations).where(ownConv(req, id));
+  if (!conv) {
+    res.status(404).json({ error: "Conversation not found" });
+    return;
+  }
 
   // Save user message
   await db.insert(messages).values({
@@ -161,10 +182,10 @@ router.post("/openai/conversations/:id/messages", async (req, res) => {
     .where(eq(messages.conversationId, id))
     .orderBy(messages.createdAt);
 
-  const chatMessages: Array<{ role: "user" | "assistant" | "system"; content: string }> = [
-    { role: "system", content: BUDDY_SYSTEM_PROMPT },
+  const chatMessages = [
+    { role: "system" as const, content: BUDDY_SYSTEM_PROMPT },
     ...history.map((m) => ({
-      role: m.role as "user" | "assistant",
+      role: m.role as "user" | "assistant" | "system",
       content: m.content,
     })),
   ];
@@ -174,40 +195,59 @@ router.post("/openai/conversations/:id/messages", async (req, res) => {
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
   res.setHeader("Access-Control-Allow-Origin", "*");
+  res.flushHeaders();
+
+  const sendError = (error: string) => {
+    res.write(`data: ${JSON.stringify({ error })}\n\n`);
+  };
+
+  const writeEvent = (data: Record<string, unknown>) => {
+    if (!res.writableEnded) {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    }
+  };
+
+  const upstreamAbort = new AbortController();
+  req.on("close", () => {
+    if (!res.writableEnded) upstreamAbort.abort();
+  });
 
   let fullResponse = "";
 
   try {
-    const stream = await openai.chat.completions.create({
-      model: "gpt-5.2",
-      max_completion_tokens: 8192,
+    await streamChat({
       messages: chatMessages,
-      stream: true,
+      maxTokens: 2048,
+      signal: upstreamAbort.signal,
+      onContent: (delta) => {
+        fullResponse += delta;
+        writeEvent({ content: delta });
+      },
     });
 
-    for await (const chunk of stream) {
-      const content = chunk.choices[0]?.delta?.content;
-      if (content) {
-        fullResponse += content;
-        res.write(`data: ${JSON.stringify({ content })}\n\n`);
+    if (!res.writableEnded) {
+      // Save assistant response
+      if (fullResponse.trim()) {
+        await db.insert(messages).values({
+          conversationId: id,
+          role: "assistant",
+          content: fullResponse,
+        });
       }
+      writeEvent({ done: true });
     }
-
-    // Save assistant response
-    await db.insert(messages).values({
-      conversationId: id,
-      role: "assistant",
-      content: fullResponse,
-    });
-
-    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
   } catch (err) {
-    console.error("OpenAI streaming error:", err);
-    res.write(
-      `data: ${JSON.stringify({ error: "Failed to generate response. Please try again." })}\n\n`,
-    );
+    if (!res.writableEnded) {
+      const message =
+        err instanceof LlmUnavailableError
+          ? err.message
+          : "Failed to generate response. Please try again.";
+      sendError(message);
+    }
   } finally {
-    res.end();
+    if (!res.writableEnded) {
+      res.end();
+    }
   }
 });
 

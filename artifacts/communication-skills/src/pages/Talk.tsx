@@ -1,114 +1,56 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import { Mic, Square, Activity, Target, Zap } from "lucide-react";
 import { useSaveSpeakingSession, useUpdateProgress } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getGetProgressQueryKey } from "@workspace/api-client-react";
+import { useLocalRecorder } from "@/hooks/useLocalRecorder";
 
 export default function Talk() {
-  const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [hasScored, setHasScored] = useState(false);
   const [startTime, setStartTime] = useState<number>(0);
-  const recognitionRef = useRef<any>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   
   const queryClient = useQueryClient();
   const { mutate: saveSession, data: result, isPending } = useSaveSpeakingSession();
   const { mutate: updateProgress } = useUpdateProgress();
 
+  const { state, transcript: recordedTranscript, isRecording, startRecording, stopRecording } = useLocalRecorder({
+    onTranscript: (text) => {
+      setTranscript(text);
+    },
+    onError: (message) => {
+      alert(message);
+    },
+    language: "en-IN",
+  });
+
   useEffect(() => {
-    return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
-    };
-  }, []);
+    if (recordedTranscript) {
+      setTranscript(recordedTranscript);
+    }
+  }, [recordedTranscript]);
 
-  const toggleRecording = async () => {
+  const toggleRecording = useCallback(() => {
     if (isRecording) {
-      recognitionRef.current?.stop();
-      setIsRecording(false);
-      return;
+      stopRecording();
+    } else {
+      startRecording();
     }
-
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      alert("Voice recognition isn't supported in this browser. Please use Chrome, Edge, or Safari.");
-      return;
-    }
-
-    // Explicitly request microphone permission first
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach(t => t.stop());
-    } catch (err: any) {
-      console.error("Mic permission error:", err);
-      if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-        alert("Microphone access was blocked. Please click the 🔒 lock icon in your browser's address bar and allow microphone access, then try again.\n\nIf you're viewing this in Replit's preview pane, click the 'Open in new tab' button above the preview to enable mic access.");
-      } else if (err.name === "NotFoundError") {
-        alert("No microphone was found. Please connect a microphone and try again.");
-      } else {
-        alert(`Could not access microphone: ${err.message || err.name}\n\nTry opening this app in a new tab.`);
-      }
-      return;
-    }
-
-    const recognition = new SpeechRecognition();
-    recognitionRef.current = recognition;
-    recognition.lang = 'en-IN';
-    recognition.continuous = true;
-    recognition.interimResults = true;
-
-    recognition.onstart = () => {
-      setIsRecording(true);
-      setTranscript("");
-      setHasScored(false);
-      setStartTime(Date.now());
-    };
-    
-    recognition.onresult = (event: any) => {
-      let finalStr = '';
-      for (let i = 0; i < event.results.length; ++i) {
-        finalStr += event.results[i][0].transcript;
-      }
-      setTranscript(finalStr);
-    };
-
-    recognition.onerror = (event: any) => {
-      console.warn("Speech recognition error:", event.error);
-      setIsRecording(false);
-      if (event.error === "not-allowed" || event.error === "service-not-allowed") {
-        alert("Microphone permission denied. Please allow microphone access in your browser settings.");
-      } else if (event.error === "no-speech" || event.error === "aborted") {
-        // silent
-      } else if (event.error === "network") {
-        const inIframe = window.self !== window.top;
-        if (inIframe) {
-          alert("Voice input is blocked inside the preview pane.\n\n✅ FIX: Click the 'Open in new tab' button (↗ icon) at the top of the preview pane to open this app in its own tab. The mic will work there.\n\n(This is a browser security restriction — Web Speech API requires a top-level page, not an embedded iframe.)");
-        } else {
-          alert("Voice input couldn't reach the speech recognition service. Please try again, or use a different browser like Chrome or Edge.");
-        }
-      }
-    };
-    recognition.onend = () => setIsRecording(false);
-    
-    try {
-      recognition.start();
-    } catch (err) {
-      console.error("Failed to start recognition:", err);
-      setIsRecording(false);
-    }
-  };
+  }, [isRecording, startRecording, stopRecording]);
 
   const handleAnalyze = () => {
     if (!transcript) return;
+    setIsAnalyzing(true);
     const words = transcript.trim().split(/\s+/).length;
-    const duration = startTime > 0 ? Math.max(1, Math.round((Date.now() - startTime) / 1000)) : 30;
+    const duration = Math.max(1, Math.round((Date.now() - (startTime || Date.now())) / 1000));
     
     saveSession({
       data: { transcript, wordCount: words, duration }
     }, {
       onSuccess: (res) => {
+        setStartTime(Date.now());
         if (!hasScored) {
           updateProgress({
             data: {
@@ -121,6 +63,7 @@ export default function Talk() {
             onSuccess: () => {
               queryClient.invalidateQueries({ queryKey: getGetProgressQueryKey() });
               setHasScored(true);
+              setIsAnalyzing(false);
             }
           });
         }
@@ -171,10 +114,10 @@ export default function Talk() {
           {!isRecording && transcript && !hasScored && (
             <button
               onClick={handleAnalyze}
-              disabled={isPending}
+              disabled={isPending || isAnalyzing}
               className="mt-6 px-8 py-3 rounded-xl font-bold bg-slate-900 text-white hover:bg-slate-800 transition-all shadow-lg"
             >
-              {isPending ? "Analyzing..." : "Analyze Recording"}
+              {isPending || isAnalyzing ? "Analyzing..." : "Analyze Recording"}
             </button>
           )}
         </div>
@@ -212,7 +155,6 @@ export default function Talk() {
             </div>
           </motion.div>
         )}
-
       </motion.div>
     </div>
   );

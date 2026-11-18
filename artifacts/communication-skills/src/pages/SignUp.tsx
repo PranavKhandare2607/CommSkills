@@ -1,28 +1,100 @@
-import { SignUp } from "@clerk/react";
-
-const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
+import { useState, type FormEvent } from "react";
+import { useLocation } from "wouter";
+import { useAuth } from "@/context/AuthContext";
 
 export default function SignUpPage() {
+  const { signUp } = useAuth();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [, setLocation] = useLocation();
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setError("");
+
+    if (password !== confirmPassword) {
+      setError("Passwords do not match");
+      return;
+    }
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters long");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await signUp(email, password);
+      setLocation("/dashboard");
+    } catch (err: any) {
+      setError(err.message || "Sign up failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-950 via-indigo-900 to-violet-900 px-4">
-      <div className="w-full flex flex-col items-center gap-8">
-        <div className="text-center">
-          <div className="flex items-center justify-center gap-3 mb-3">
-            <div className="w-10 h-10 rounded-xl bg-indigo-400 flex items-center justify-center">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z" fill="white"/>
-              </svg>
-            </div>
-            <span className="text-white text-2xl font-bold tracking-tight">CommSkills</span>
-          </div>
-          <p className="text-indigo-200 text-sm">Your personal communication coach</p>
+      <div className="w-full max-w-md">
+        <div className="text-center mb-8">
+          <h1 className="text-white text-3xl font-bold tracking-tight mb-2">Create your account</h1>
+          <p className="text-indigo-200">Start improving your communication today</p>
         </div>
-        <SignUp
-          routing="path"
-          path={`${basePath}/sign-up`}
-          signInUrl={`${basePath}/sign-in`}
-          fallbackRedirectUrl={`${basePath}/dashboard`}
-        />
+        <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-2xl p-8 space-y-5">
+          {error && (
+            <div className="bg-red-50 border border-red-100 text-red-700 rounded-xl px-4 py-3 text-sm">
+              {error}
+            </div>
+          )}
+          <div>
+            <label className="block text-slate-700 font-medium mb-1.5 text-sm">Email</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              placeholder="you@example.com"
+            />
+          </div>
+          <div>
+            <label className="block text-slate-700 font-medium mb-1.5 text-sm">Password</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              placeholder="At least 8 characters"
+            />
+          </div>
+          <div>
+            <label className="block text-slate-700 font-medium mb-1.5 text-sm">Confirm password</label>
+            <input
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              required
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              placeholder="Re-enter your password"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl py-3 font-semibold transition-colors disabled:opacity-50"
+          >
+            {loading ? "Creating account..." : "Sign up"}
+          </button>
+          <p className="text-center text-sm text-slate-500">
+            Already have an account?{" "}
+            <a href="/sign-in" className="text-indigo-600 hover:text-indigo-700 font-medium">
+              Sign in
+            </a>
+          </p>
+        </form>
       </div>
     </div>
   );

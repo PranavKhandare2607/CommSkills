@@ -18,14 +18,16 @@ import {
   Crown,
   Zap,
   MessageCircle,
+  LogOut,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { useGetProgress } from "@workspace/api-client-react";
 import { useSubscription } from "@/hooks/useSubscription";
 import { TrialBanner } from "@/components/TrialBanner";
-
-const developmentGuestMode = import.meta.env.DEV;
+import { useAuth } from "@/context/AuthContext";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -45,6 +47,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { data: progress } = useGetProgress();
   const { data: sub } = useSubscription();
+  const { signOut, isAuthenticated } = useAuth();
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
@@ -150,6 +153,26 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               </Link>
             )}
 
+{/* AI Status Indicator */}
+            <div className="flex items-center gap-2 px-1 py-2 text-xs text-indigo-300 border-t border-indigo-900/50">
+              <span className={cn(
+                "w-2 h-2 rounded-full flex-shrink-0",
+                isAuthenticated ? "bg-emerald-400" : "bg-slate-400"
+              )} />
+              <span>{isAuthenticated ? "AI Services Online" : "Sign in for AI"}</span>
+            </div>
+
+            {/* Sign Out */}
+            {isAuthenticated && (
+              <button
+                onClick={signOut}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-indigo-200 hover:text-white hover:bg-indigo-900/50 rounded-xl text-xs font-medium transition-colors"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                Sign Out
+              </button>
+            )}
+
             {/* Help — WhatsApp */}
             <a
               href="https://wa.me/918796439008"
@@ -158,7 +181,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               className="w-full flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white text-xs font-semibold py-2.5 rounded-xl transition-all"
             >
               <MessageCircle className="w-3.5 h-3.5" />
-              Help &amp; Support
+              Help & Support
             </a>
           </div>
         </div>
@@ -166,12 +189,6 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
       {/* Mobile Header */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {developmentGuestMode && (
-          <div className="shrink-0 bg-amber-100 border-b border-amber-200 px-4 py-2 text-center text-xs font-medium text-amber-900">
-            Development guest mode — you can test Premium features without signing in. This access is only available in development.
-          </div>
-        )}
-
         <header className="md:hidden flex items-center justify-between p-4 bg-indigo-950 border-b border-indigo-900 z-20 text-white shadow-md">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-indigo-500 flex items-center justify-center">

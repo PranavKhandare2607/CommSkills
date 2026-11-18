@@ -1,18 +1,41 @@
 import OpenAI from "openai";
 
-if (!process.env.AI_INTEGRATIONS_OPENAI_BASE_URL) {
-  throw new Error(
-    "AI_INTEGRATIONS_OPENAI_BASE_URL must be set. Did you forget to provision the OpenAI AI integration?",
-  );
+/**
+ * Shared OpenAI-compatible client for the local model server.
+ *
+ * This project is configured to talk ONLY to a local OpenAI-compatible server
+ * (Ollama by default). It must never be pointed at a hosted cloud endpoint.
+ * Configuration is read lazily so that importing this module never throws when
+ * the local model server has not been configured or is temporarily down; the
+ * caller receives an explicit "local model unavailable" error instead.
+ */
+function resolveBaseUrl(): string {
+  return process.env.LLM_BASE_URL ?? "http://host.docker.internal:11434/v1";
 }
 
-if (!process.env.AI_INTEGRATIONS_OPENAI_API_KEY) {
-  throw new Error(
-    "AI_INTEGRATIONS_OPENAI_API_KEY must be set. Did you forget to provision the OpenAI AI integration?",
-  );
+function resolveApiKey(): string {
+  return process.env.LLM_API_KEY ?? "ollama";
 }
 
-export const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+let cachedClient: { client: OpenAI; baseURL: string; apiKey: string } | null = null;
+
+export function getOpenAIClient(): OpenAI {
+  const baseURL = resolveBaseUrl();
+  const apiKey = resolveApiKey();
+
+  if (!cachedClient || cachedClient.baseURL !== baseURL || cachedClient.apiKey !== apiKey) {
+    cachedClient = { client: new OpenAI({ apiKey, baseURL }), baseURL, apiKey };
+  }
+
+  return cachedClient.client;
+}
+
+/**
+ * Backwards-compatible named export. Accessing a method on this proxy resolves
+ * the lazily-configured local client on first use.
+ */
+export const openai: OpenAI = new Proxy({} as OpenAI, {
+  get(_target, prop, receiver) {
+    return Reflect.get(getOpenAIClient(), prop, receiver);
+  },
 });

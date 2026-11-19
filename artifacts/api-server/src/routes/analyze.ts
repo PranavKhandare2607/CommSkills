@@ -36,7 +36,7 @@ Be constructive and specific. Analyze each C of Communication separately.`,
           content: `Analyze this communication text:\n\n${body.text}`,
         },
       ],
-      maxTokens: 2048,
+      maxTokens: 900,
     });
 
     res.json({

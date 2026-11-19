@@ -176,11 +176,16 @@ router.post("/openai/conversations/:id/messages", requireAuth, async (req, res) 
   });
 
   // Get conversation history
-  const history = await db
-    .select()
-    .from(messages)
-    .where(eq(messages.conversationId, id))
-    .orderBy(messages.createdAt);
+  // Keep prompt size bounded: long conversations otherwise get slower on
+  // every turn because the whole history is re-encoded each time.
+  const history = (
+    await db
+      .select()
+      .from(messages)
+      .where(eq(messages.conversationId, id))
+      .orderBy(desc(messages.createdAt))
+      .limit(20)
+  ).reverse();
 
   const chatMessages = [
     { role: "system" as const, content: BUDDY_SYSTEM_PROMPT },
@@ -194,6 +199,7 @@ router.post("/openai/conversations/:id/messages", requireAuth, async (req, res) 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
 
   const sendError = (error: string) => {
@@ -216,7 +222,7 @@ router.post("/openai/conversations/:id/messages", requireAuth, async (req, res) 
   try {
     await streamChat({
       messages: chatMessages,
-      maxTokens: 2048,
+      maxTokens: 800,
       signal: upstreamAbort.signal,
       onContent: (delta) => {
         fullResponse += delta;

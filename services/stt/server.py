@@ -1,3 +1,4 @@
+import asyncio
 import os
 import tempfile
 from contextlib import asynccontextmanager
@@ -9,6 +10,9 @@ _model = None
 _model_name = os.getenv("STT_MODEL", "base")
 _device = os.getenv("STT_DEVICE", "cpu")
 _compute_type = os.getenv("STT_COMPUTE_TYPE", "int8")
+# Greedy decoding is several times faster than beam search with a small
+# accuracy trade-off, which is worth it for voice UI responsiveness.
+_beam_size = int(os.getenv("STT_BEAM_SIZE", "1"))
 
 
 def get_model():
@@ -22,7 +26,7 @@ def get_model():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    get_model()
+    await asyncio.to_thread(get_model)
     yield
 
 
@@ -34,16 +38,20 @@ async def health():
     return {"status": "ok", "model": _model_name}
 
 
+def _transcribe_file(path: str):
+    return get_model().transcribe(path, beam_size=_beam_size)
+
+
 @app.post("/transcribe")
 async def transcribe(file: UploadFile = File(...)):
     suffix = os.path.splitext(file.filename or "audio.webm")[1] or ".webm"
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        content = await file.read()
-        tmp.write(content)
+        tmp.write(await file.read())
         tmp_path = tmp.name
 
     try:
-        segments, info = get_model().transcribe(tmp_path, beam_size=5)
+        # faster-whisper is synchronous; keep FastAPI's event loop responsive.
+        segments, info = await asyncio.to_thread(_transcribe_file, tmp_path)
         text = " ".join(segment.text for segment in segments).strip()
         return {
             "text": text,

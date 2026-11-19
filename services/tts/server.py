@@ -1,7 +1,10 @@
+import asyncio
+import io
 import os
-import tempfile
+import threading
 import urllib.request
 import wave
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -10,6 +13,7 @@ from fastapi.responses import Response
 
 VOICES_DIR = os.getenv("VOICES_DIR", "/voices")
 HF_BASE = "https://huggingface.co/rhasspy/piper-voices/resolve/main"
+MAX_AUDIO_CACHE = int(os.getenv("TTS_AUDIO_CACHE_SIZE", "200"))
 
 # Language key -> (Piper voice name, path prefix inside the HF voices repo)
 VOICE_MAP = {
@@ -24,6 +28,11 @@ VOICE_MAP = {
 }
 
 _default_key = "en_US"
+
+# A Piper voice takes seconds to load, so keep models and recent audio in memory.
+_voices: dict[str, object] = {}
+_audio_cache: OrderedDict[tuple[str, str], bytes] = OrderedDict()
+_voice_lock = threading.Lock()
 
 
 def _ensure_voice(voice_name: str, hf_prefix: str) -> None:
@@ -43,15 +52,59 @@ def _ensure_voice(voice_name: str, hf_prefix: str) -> None:
     print(f"Voice ready: {voice_name}", flush=True)
 
 
-def _ensure_all_voices() -> None:
-    for _key, (name, prefix) in VOICE_MAP.items():
-        _ensure_voice(name, prefix)
+def _load_voice(voice_key: str):
+    if voice_key in _voices:
+        return _voices[voice_key]
+
+    from piper import PiperVoice
+
+    voice_name, _prefix = VOICE_MAP.get(voice_key, VOICE_MAP[_default_key])
+    voice_path = os.path.join(VOICES_DIR, f"{voice_name}.onnx")
+    if not os.path.exists(voice_path):
+        raise HTTPException(status_code=500, detail=f"Voice not found: {voice_name}")
+
+    with _voice_lock:
+        if voice_key not in _voices:
+            _voices[voice_key] = PiperVoice.load(voice_path)
+    return _voices[voice_key]
+
+
+def _synthesize(text: str, voice_key: str) -> bytes:
+    cache_key = (voice_key, text)
+    cached = _audio_cache.get(cache_key)
+    if cached is not None:
+        _audio_cache.move_to_end(cache_key)
+        return cached
+
+    voice = _load_voice(voice_key)
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wav_file:
+        with _voice_lock:
+            voice.synthesize(text, wav_file)
+
+    audio = buffer.getvalue()
+    _audio_cache[cache_key] = audio
+    _audio_cache.move_to_end(cache_key)
+    while len(_audio_cache) > MAX_AUDIO_CACHE:
+        _audio_cache.popitem(last=False)
+    return audio
+
+
+def _preload() -> None:
+    for key in VOICE_MAP:
+        _load_voice(key)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    _ensure_all_voices()
+    await asyncio.to_thread(_ensure_all_voices)
+    await asyncio.to_thread(_preload)
     yield
+
+
+def _ensure_all_voices() -> None:
+    for _key, (name, prefix) in VOICE_MAP.items():
+        _ensure_voice(name, prefix)
 
 
 app = FastAPI(lifespan=lifespan)
@@ -69,29 +122,16 @@ async def speak(body: dict):
     if not isinstance(text, str) or not text.strip():
         raise HTTPException(status_code=400, detail="text is required")
 
-    voice_name, _prefix = VOICE_MAP.get(voice_key, VOICE_MAP[_default_key])
-    voice_path = os.path.join(VOICES_DIR, f"{voice_name}.onnx")
-    if not os.path.exists(voice_path):
-        raise HTTPException(status_code=500, detail=f"Voice not found: {voice_name}")
+    if voice_key not in VOICE_MAP:
+        voice_key = _default_key
 
     try:
-        from piper import PiperVoice
-
-        voice = PiperVoice.load(voice_path)
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-            tmp_path = tmp.name
-
-        with wave.open(tmp_path, "wb") as wav_file:
-            voice.synthesize(text, wav_file)
-
-        with open(tmp_path, "rb") as f:
-            audio_data = f.read()
-
-        os.unlink(tmp_path)
+        # Keep the event loop free: synthesis blocks for a while on CPU.
+        audio = await asyncio.to_thread(_synthesize, text, voice_key)
         return Response(
-            content=audio_data,
+            content=audio,
             media_type="audio/wav",
-            headers={"Cache-Control": "no-cache"},
+            headers={"Cache-Control": "public, max-age=3600"},
         )
     except HTTPException:
         raise

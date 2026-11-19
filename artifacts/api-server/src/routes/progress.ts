@@ -101,17 +101,19 @@ async function buildHistory(userId: string) {
 // GET /progress
 router.get("/progress", requireAuth, async (req, res) => {
   const userId = (req as typeof req & { userId: string }).userId;
-  const progress = await getOrCreateProgress(userId);
-
-  // Get recent activity (last 10)
-  const recentActivity = await db
-    .select()
-    .from(activityLogTable)
-    .where(eq(activityLogTable.userId, userId))
-    .orderBy(desc(activityLogTable.createdAt))
-    .limit(10);
-
-  const { grammarHistory, vocabularyHistory } = await buildHistory(userId);
+  // These reads are independent — run them together so the dashboard paints
+  // after one DB round trip instead of three.
+  const [progress, recentActivity, { grammarHistory, vocabularyHistory }] =
+    await Promise.all([
+      getOrCreateProgress(userId),
+      db
+        .select()
+        .from(activityLogTable)
+        .where(eq(activityLogTable.userId, userId))
+        .orderBy(desc(activityLogTable.createdAt))
+        .limit(10),
+      buildHistory(userId),
+    ]);
 
   res.json({
     points: progress.points,
@@ -156,11 +158,14 @@ router.post("/progress", requireAuth, async (req, res) => {
     updates.speakingAttempts = (progress.speakingAttempts ?? 0) + 1;
   }
 
-  const [updated] = await db
-    .update(userProgressTable)
-    .set(updates)
-    .where(eq(userProgressTable.userId, userId))
-    .returning();
+  const [[updated], { grammarHistory, vocabularyHistory }] = await Promise.all([
+    db
+      .update(userProgressTable)
+      .set(updates)
+      .where(eq(userProgressTable.userId, userId))
+      .returning(),
+    buildHistory(userId),
+  ]);
 
   // Log activity
   await db.insert(activityLogTable).values({
@@ -178,8 +183,6 @@ router.post("/progress", requireAuth, async (req, res) => {
     .where(eq(activityLogTable.userId, userId))
     .orderBy(desc(activityLogTable.createdAt))
     .limit(10);
-
-  const { grammarHistory, vocabularyHistory } = await buildHistory(userId);
 
   res.json({
     points: updated.points,

@@ -7,7 +7,8 @@
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck",
-    "sync:pages": "powershell -ExecutionPolicy Bypass -File scripts/sync-pages-api.ps1"
+    "sync:pages": "powershell -ExecutionPolicy Bypass -File scripts/sync-pages-api.ps1",
+    "setup:local-model": "powershell -ExecutionPolicy Bypass -File scripts/setup-local-model.ps1"
   },
   "private": true,
   "devDependencies": {

@@ -422,7 +422,7 @@ Return ONLY valid JSON in this EXACT shape:
       const parsed = await chatJson({
         system: "You are a communication skills assessor. Always respond with valid JSON only, no markdown wrappers.",
         messages: [{ role: "user", content: prompt }],
-        maxTokens: 1000,
+        maxTokens: 700,
       });
 
       res.json({

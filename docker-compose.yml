@@ -23,8 +23,8 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql://commskills:commskills@db:5432/commskills}
       LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:11434/v1}
       LLM_API_KEY: ${LLM_API_KEY:-ollama}
-      LLM_CHAT_MODEL: ${LLM_CHAT_MODEL:-qwen3-coder:30b}
-      LLM_REQUEST_TIMEOUT_MS: ${LLM_REQUEST_TIMEOUT_MS:-600000}
+      LLM_CHAT_MODEL: ${LLM_CHAT_MODEL:-commskills-turbo}
+      LLM_REQUEST_TIMEOUT_MS: ${LLM_REQUEST_TIMEOUT_MS:-120000}
       LOCAL_PREMIUM_MODE: ${LOCAL_PREMIUM_MODE:-true}
       SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-commskills_session}
       SESSION_TTL_DAYS: ${SESSION_TTL_DAYS:-30}
@@ -70,6 +70,7 @@ services:
       STT_MODEL: ${STT_MODEL:-base}
       STT_DEVICE: ${STT_DEVICE:-cpu}
       STT_COMPUTE_TYPE: ${STT_COMPUTE_TYPE:-int8}
+      STT_BEAM_SIZE: ${STT_BEAM_SIZE:-1}
     volumes:
       - stt-cache:/root/.cache
     restart: unless-stopped
@@ -88,6 +89,7 @@ services:
       VOICES_DIR: /voices
       TTS_VOICE_EN: ${TTS_VOICE_EN:-en_US-amy-medium}
       TTS_VOICE_HI: ${TTS_VOICE_HI:-hi_IN-priyamvada-medium}
+      TTS_AUDIO_CACHE_SIZE: ${TTS_AUDIO_CACHE_SIZE:-200}
     volumes:
       - tts-voices:/voices
     restart: unless-stopped
@@ -100,7 +102,7 @@ services:
 
   tunnel:
     image: cloudflare/cloudflared:latest
-    command: ["tunnel", "--url", "http://api:8080", "--metrics", "0.0.0.0:2000"]
+    command: ["tunnel", "--url", "http://api:8080", "--protocol", "http2", "--metrics", "0.0.0.0:2000"]
     ports:
       - "2001:2000"
     depends_on:

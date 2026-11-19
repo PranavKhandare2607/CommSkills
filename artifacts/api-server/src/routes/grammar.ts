@@ -31,7 +31,7 @@ Be specific about what was corrected. If the text is already perfect, set score 
           content: `Please check the grammar of this text:\n\n${body.text}`,
         },
       ],
-      maxTokens: 2048,
+      maxTokens: 700,
     });
 
     res.json({

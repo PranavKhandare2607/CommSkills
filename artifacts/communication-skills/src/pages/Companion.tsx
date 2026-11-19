@@ -585,7 +585,7 @@ export default function Companion() {
           if (voiceModeRef.current && !isMutedRef.current && !isListeningRef.current && !isStreamingRef.current && !queueRunningRef.current) {
             startListeningRef.current?.();
           }
-        }, 250);
+        }, 120);
       }
     };
   }, []);
@@ -742,13 +742,13 @@ export default function Companion() {
             if (voiceModeRef.current && !isMutedRef.current && !isStreamingRef.current && !isListeningRef.current) {
               startListeningRef.current?.();
             }
-          }, 600);
+          }, 300);
           return;
         }
         setVoiceError(null);
         setTimeout(() => {
           if (voiceModeRef.current && !isStreamingRef.current) sendMessageRef.current?.(txt);
-        }, 75);
+        }, 20);
       }
     };
     try { recognition.start(); } catch {
@@ -1054,9 +1054,9 @@ export default function Companion() {
       callTimerRef.current = setInterval(() => setCallSeconds(s => s + 1), 1000);
        if (hadActiveSession && speechRecognitionSupported && !isSpeakingRef.current) {
         // Session already running (e.g. resumed) — jump straight into listening.
-        setTimeout(() => startListeningRef.current?.(), 300);
+        setTimeout(() => startListeningRef.current?.(), 120);
       }
-    }, 900);
+    }, 400);
   }, [mode, interviewProfile, startSession, stopAllSpeech, unlockAudioPlayback, speechRecognitionSupported]);
 
   const endCall = useCallback(() => {

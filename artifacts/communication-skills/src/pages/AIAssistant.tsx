@@ -134,7 +134,7 @@ export default function AIAssistant() {
     onTranscript: (text) => {
       setInput(text);
       if (voiceMode) {
-        setTimeout(() => handleSend(text.trim()), 300);
+        setTimeout(() => handleSend(text.trim()), 100);
       }
     },
     onError: (message) => {

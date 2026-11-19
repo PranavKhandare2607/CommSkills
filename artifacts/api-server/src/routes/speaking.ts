@@ -30,7 +30,7 @@ Be encouraging but specific about improvements.`,
           content: `Analyze this speech transcript (${body.wordCount} words, ${body.duration ?? 0} seconds):\n\n${body.transcript}`,
         },
       ],
-      maxTokens: 2048,
+      maxTokens: 600,
     });
 
     res.json({

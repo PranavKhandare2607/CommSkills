@@ -40,7 +40,7 @@ Provide 1-3 definitions. Always include the pronunciation in standard IPA notati
           content: `Look up this word: ${body.word}`,
         },
       ],
-      maxTokens: 2048,
+      maxTokens: 900,
     });
 
     res.json({

@@ -24,6 +24,13 @@ export interface LlmConfig {
   timeoutMs: number;
 }
 
+/**
+ * Ollama keeps a model in memory for a short period after the last request,
+ * which makes the first request after an idle spell painfully slow on CPU.
+ * We ask Ollama to pin the configured model indefinitely and warm it at boot.
+ */
+const KEEP_MODEL_LOADED = -1;
+
 function envNumber(name: string, fallback: number): number {
   const raw = process.env[name];
   if (!raw) return fallback;
@@ -35,10 +42,9 @@ export function getLlmConfig(): LlmConfig {
   return {
     baseUrl: process.env.LLM_BASE_URL ?? "http://host.docker.internal:11434/v1",
     apiKey: process.env.LLM_API_KEY ?? "ollama",
-    model: process.env.LLM_CHAT_MODEL ?? "qwen3-coder:30b",
-    // Cold-loading a large local model can take several minutes on CPU, so the
-    // default is intentionally generous (10 min). Override per machine.
-    timeoutMs: envNumber("LLM_REQUEST_TIMEOUT_MS", 600000),
+    model: process.env.LLM_CHAT_MODEL ?? "commskills-turbo",
+    // Small local model + pinned context means requests finish in seconds.
+    timeoutMs: envNumber("LLM_REQUEST_TIMEOUT_MS", 120000),
   };
 }
 
@@ -73,6 +79,22 @@ interface SchemaLike<T> {
   safeParse(data: unknown): { success: boolean; data?: T };
 }
 
+// Short-lived cache for identical analysis/lookup prompts. Repeat submissions
+// and double-clicks return instantly instead of re-running the CPU model.
+const RESPONSE_CACHE_TTL_MS = 5 * 60 * 1000;
+const RESPONSE_CACHE_MAX = 200;
+const responseCache = new Map<string, { value: unknown; expires: number }>();
+
+function cacheKey(cfg: LlmConfig, params: ChatJsonParams): string {
+  return JSON.stringify([
+    cfg.model,
+    params.system ?? "",
+    params.messages,
+    params.maxTokens ?? 4096,
+    params.temperature ?? 0.7,
+  ]);
+}
+
 function isUnavailable(err: any): boolean {
   return (
     err?.code === "ECONNREFUSED" ||
@@ -102,6 +124,16 @@ export async function chatJson<T = any>(
 ): Promise<T> {
   const cfg = getLlmConfig();
   const client = getLlmClient();
+  const key = cacheKey(cfg, params);
+
+  const cached = responseCache.get(key);
+  if (cached) {
+    if (cached.expires > Date.now()) {
+      cached.expires = Date.now() + RESPONSE_CACHE_TTL_MS;
+      return cached.value as T;
+    }
+    responseCache.delete(key);
+  }
 
   const messages: any[] = [
     ...(params.system ? [{ role: "system", content: params.system }] : []),
@@ -116,21 +148,34 @@ export async function chatJson<T = any>(
         temperature: params.temperature ?? 0.7,
         messages,
         response_format: { type: "json_object" },
-      },
+        keep_alive: KEEP_MODEL_LOADED,
+      } as any,
       { signal: params.signal },
     );
 
     const raw = completion.choices[0]?.message?.content ?? "";
     const parsed = parseJsonLoose(raw);
 
+    let result: T;
     if (schema) {
-      const result = schema.safeParse(parsed);
-      if (!result.success || result.data === undefined) {
+      const validated = schema.safeParse(parsed);
+      if (!validated.success || validated.data === undefined) {
         throw new Error("Local model JSON failed schema validation");
       }
-      return result.data;
+      result = validated.data;
+    } else {
+      result = parsed as T;
     }
-    return parsed as T;
+
+    if (responseCache.size >= RESPONSE_CACHE_MAX) {
+      const oldest = responseCache.keys().next().value;
+      if (oldest !== undefined) responseCache.delete(oldest);
+    }
+    responseCache.set(key, {
+      value: result,
+      expires: Date.now() + RESPONSE_CACHE_TTL_MS,
+    });
+    return result;
   } catch (err) {
     if (isUnavailable(err)) {
       throw new LlmUnavailableError("Local LLM unavailable. Check Ollama is running.");
@@ -160,11 +205,12 @@ export async function streamChat(params: StreamChatParams): Promise<void> {
         temperature: params.temperature ?? 0.7,
         messages: params.messages as any,
         stream: true,
-      },
+        keep_alive: KEEP_MODEL_LOADED,
+      } as any,
       { signal: params.signal },
     );
 
-    for await (const chunk of stream) {
+    for await (const chunk of stream as any) {
       const content = chunk.choices[0]?.delta?.content;
       if (content) params.onContent(content);
     }
@@ -186,9 +232,17 @@ export interface LlmStatus {
 export async function getLlmStatus(): Promise<LlmStatus> {
   const cfg = getLlmConfig();
   try {
-    const client = getLlmClient();
+    // Health checks must not inherit the (much longer) generation timeout.
+    const client = new OpenAI({
+      baseURL: cfg.baseUrl,
+      apiKey: cfg.apiKey,
+      timeout: 2000,
+      maxRetries: 0,
+    });
     const models = await client.models.list();
-    const hasModel = models.data.some((m: any) => m.id === cfg.model);
+    const hasModel = models.data.some(
+      (m: any) => m.id === cfg.model || m.id === `${cfg.model}:latest`,
+    );
     return {
       ok: hasModel,
       model: cfg.model,
@@ -206,5 +260,29 @@ export async function getLlmStatus(): Promise<LlmStatus> {
       baseUrl: cfg.baseUrl,
       error: `Cannot reach Ollama: ${err?.message ?? err}`,
     };
+  }
+}
+
+/**
+ * Ask Ollama to load and pin the configured model at startup so the first real
+ * user request never pays the cold-load cost.
+ */
+export async function warmLlm(): Promise<void> {
+  const cfg = getLlmConfig();
+  try {
+    const client = new OpenAI({
+      baseURL: cfg.baseUrl,
+      apiKey: cfg.apiKey,
+      timeout: 30000,
+      maxRetries: 0,
+    });
+    await client.chat.completions.create({
+      model: cfg.model,
+      messages: [{ role: "user", content: "ok" }],
+      max_completion_tokens: 1,
+      keep_alive: KEEP_MODEL_LOADED,
+    } as any);
+  } catch {
+    // Ollama may be starting separately; requests will still work once it is up.
   }
 }

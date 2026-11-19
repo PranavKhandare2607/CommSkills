@@ -1,5 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
+import { warmLlm } from "./lib/llm";
 import { runMigrations } from "@workspace/db/migrate";
 
 const rawPort = process.env["PORT"] ?? "8080";
@@ -20,6 +21,7 @@ runMigrations()
         process.exit(1);
       }
       logger.info({ port }, "Server listening");
+      void warmLlm();
     });
   })
   .catch((err) => {

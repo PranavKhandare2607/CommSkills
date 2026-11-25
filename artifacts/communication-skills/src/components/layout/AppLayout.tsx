@@ -38,6 +38,7 @@ const navItems = [
   { href: "/talk", label: "Speaking Practice", icon: Mic },
   { href: "/word", label: "Word Practice", icon: Sparkles },
   { href: "/companion", label: "AI Companion", icon: Heart, isPrimary: true },
+  { href: "/buy-premium", label: "Buy Premium", icon: Crown, isPrimary: true },
   { href: "/resources", label: "Resources", icon: Library },
   { href: "/games", label: "Practice Games", icon: Gamepad2 },
 ];

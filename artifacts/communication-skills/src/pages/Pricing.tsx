@@ -1,3 +1,4 @@
+import { Link } from "wouter";
 import { Check, Zap, Crown, Lock } from "lucide-react";
 import { useSubscription } from "@/hooks/useSubscription";
 
@@ -111,14 +112,14 @@ export default function Pricing() {
                 </div>
               ) : (
                 <div>
-                  <button
-                    className="w-full bg-white text-indigo-600 hover:bg-indigo-50 font-bold py-3 rounded-xl transition-colors mb-2"
-                    onClick={() => alert("Stripe integration coming soon! Connect your Stripe account to enable payments.")}
+                  <Link
+                    href="/buy-premium"
+                    className="block w-full bg-white text-indigo-600 hover:bg-indigo-50 font-bold py-3 rounded-xl transition-colors mb-2 text-center"
                   >
-                    {isInTrial ? `Upgrade Now — Lock In ₹110/mo` : "Start 10-Day Free Trial"}
-                  </button>
+                    Buy Premium — ₹110/month
+                  </Link>
                   <p className="text-indigo-200 text-xs text-center">
-                    {isInTrial ? "Cancel anytime" : "10 days free · No credit card required"}
+                    Pay securely with UPI · Manual activation
                   </p>
                 </div>
               )}

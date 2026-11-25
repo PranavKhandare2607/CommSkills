@@ -10,6 +10,7 @@ import Landing from "@/pages/Landing";
 import SignInPage from "@/pages/SignIn";
 import SignUpPage from "@/pages/SignUp";
 import Pricing from "@/pages/Pricing";
+import BuyPremium from "@/pages/BuyPremium";
 import Dashboard from "@/pages/Dashboard";
 import AIAssistant from "@/pages/AIAssistant";
 import Analyzer from "@/pages/Analyzer";
@@ -66,6 +67,7 @@ function Router() {
       <Route path="/companion" component={() => <ProtectedRoute component={Companion} />} />
       <Route path="/resources" component={() => <ProtectedRoute component={Resources} />} />
       <Route path="/games" component={() => <ProtectedRoute component={Games} />} />
+      <Route path="/buy-premium" component={() => <ProtectedRoute component={BuyPremium} />} />
       <Route path="/pricing" component={Pricing} />
       <Route component={NotFound} />
     </Switch>

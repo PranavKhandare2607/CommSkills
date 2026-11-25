@@ -471,7 +471,11 @@ export default function Companion() {
   // Plays a single chunk of text and resolves once playback (or fallback) ends.
   const playChunk = useCallback((text: string, generation: number): Promise<void> => {
     return new Promise((resolve) => {
-      const clean = prepareCompanionSpeech(text);
+      const prepared = prepareCompanionSpeech(text);
+      // A trailing full stop makes most speech engines insert a long
+      // end-of-sentence pause. Remove it from audio only; the visible reply
+      // keeps its punctuation.
+      const clean = prepared.replace(/[.\s]+$/, "").trim() || prepared;
       if (!clean || generation !== speechGenerationRef.current) {
         resolve();
         return;
@@ -497,21 +501,15 @@ export default function Companion() {
       const run = async () => {
         const speechLang = lang === "hindi" ? "hi-IN" : "en-IN";
         const label = lang === "hindi"
-          ? "Indian Hindi"
+          ? "Professional Indian Hindi"
           : lang === "hinglish"
-            ? "Indian English (Hinglish)"
-            : "Indian English";
+            ? "Professional Indian English (Hinglish)"
+            : "Professional Indian English (Maharashtrian)";
 
-        // Priya sounds lively; Aisha stays calm and encouraging. Punctuation
-        // adds a little feeling without changing the spoken words.
-        let rate = mode === "friend" ? 1.02 : 0.96;
-        let pitch = mode === "friend" ? 1.12 : 1.05;
-        const finalChar = clean.trimEnd().slice(-1);
-        if (finalChar === "!") { rate += 0.03; pitch += 0.06; }
-        else if (finalChar === "?") { pitch += 0.04; }
-        else if (/(\.\.\.|…)\s*$/.test(clean)) { rate -= 0.04; }
-        rate = Math.min(1.1, Math.max(0.88, rate));
-        pitch = Math.min(1.25, Math.max(0.95, pitch));
+        // Neutral, professional delivery. Avoid mode/punctuation-driven pitch
+        // swings so the companion never sounds theatrical or overly casual.
+        const rate = 0.98;
+        const pitch = 1.0;
         const style = expressiveStyle(rate, pitch);
 
         let safetyTimer: ReturnType<typeof setTimeout> | null = null;
@@ -526,15 +524,18 @@ export default function Companion() {
         const onStart = () => setIsSpeaking(true);
         const onEnd = () => { clearSafetyTimer(); finish(); };
 
-        // 1. Prefer a real Indian browser voice. Generic en-US/en-GB voices are
-        //    rejected below so the accent never quietly changes.
+        // 1. Prefer a calm, professional Indian browser voice. Raveena is
+        //    skipped when a better en-IN voice exists; generic en-US/en-GB
+        //    voices are always rejected so the accent never quietly changes.
         setActiveVoiceName(`${label} voice`);
         const attempt = await speakWithAccent(clean, {
           lang: speechLang,
           rate,
           pitch,
           requireIndianVoice: true,
-          startTimeoutMs: 800,
+          preferProfessional: true,
+          skipCancelPause: true,
+          startTimeoutMs: 300,
           onStart,
           onEnd,
           onError: () => {},
@@ -542,16 +543,18 @@ export default function Companion() {
         activeUtteranceRef.current = attempt.utterance;
         if (generation !== speechGenerationRef.current) return;
         if (attempt.started) {
+          const voiceName = attempt.utterance?.voice?.name;
+          if (voiceName) setActiveVoiceName(`${label} · ${voiceName}`);
           keepQueueAlive();
           return;
         }
 
-        // 2. Server audio: neural Indian voice with expressive rate/pitch.
+        // 2. Server audio: Neerja neural en-IN voice, also kept professional.
         //    Uses /api/tts/speak (login only) so it works even if the
         //    Premium-gated companion endpoint is unavailable.
         const ctrl = new AbortController();
         ttsAbortRef.current = ctrl;
-        setActiveVoiceName(`${label} voice · expressive`);
+        setActiveVoiceName(`${label} · Neerja`);
         let serverStarted = false;
         let serverError: any = null;
         try {
@@ -605,7 +608,7 @@ export default function Companion() {
       };
       run().catch(() => finish());
     });
-  }, [mode]);
+  }, []);
 
   // Drains the speech queue in order — plays chunk 1 while chunk 2/3 may
   // still be arriving from the stream, so audio starts as early as possible.

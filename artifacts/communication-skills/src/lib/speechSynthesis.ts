@@ -11,6 +11,28 @@
 const FEMALE_VOICE_HINT =
   /female|woman|girl|heera|raveena|kalpana|priya|veena|aditi|leela|shelley|samantha|zira|susan|karen|tessa|fiona|moira|catherine|allison|ava|serena|victoria|neerja|swara|ananya|diya|meera|sneha/i;
 
+// For the Companion we want a calm, professional Indian English voice. Raveena
+// is deliberately last: when a neutral/neural voice exists, prefer it instead.
+const PROFESSIONAL_EN_IN_PRIORITY = [
+  /neerja/i,
+  /heera/i,
+  /google/i,
+  /manisha/i,
+  /ananya/i,
+  /swara/i,
+];
+const CASUAL_EN_IN_VOICE = /raveena/i;
+
+function pickProfessionalIndianVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | undefined {
+  for (const pattern of PROFESSIONAL_EN_IN_PRIORITY) {
+    const found = voices.find((voice) => pattern.test(voice.name));
+    if (found) return found;
+  }
+  return voices.find(
+    (voice) => FEMALE_VOICE_HINT.test(voice.name) && !CASUAL_EN_IN_VOICE.test(voice.name),
+  );
+}
+
 export function isBrowserSpeechSupported(): boolean {
   return (
     typeof window !== "undefined" &&
@@ -47,7 +69,11 @@ export function waitForVoices(timeoutMs = 900): Promise<void> {
  * skipped so the caller can use the server's Indian neural voice instead of
  * speaking with the wrong accent.
  */
-export function pickAccentedVoice(lang: string, requireIndian = false): SpeechSynthesisVoice | undefined {
+export function pickAccentedVoice(
+  lang: string,
+  requireIndian = false,
+  preferProfessional = false,
+): SpeechSynthesisVoice | undefined {
   const voices = getSpeechVoices();
   if (voices.length === 0) return undefined;
 
@@ -65,9 +91,19 @@ export function pickAccentedVoice(lang: string, requireIndian = false): SpeechSy
   }
 
   // English / Hinglish: prefer an Indian English female voice.
+  const enInVoices = matches("en-in");
+  if (preferProfessional) {
+    const professional = pickProfessionalIndianVoice(enInVoices);
+    if (professional) return professional;
+    // If only a voice the user found unsuitable remains, let the caller use
+    // the server's professional neural en-IN voice instead.
+    return requireIndian
+      ? undefined
+      : matches("en").find((voice) => FEMALE_VOICE_HINT.test(voice.name)) || matches("en")[0];
+  }
   return (
-    matches("en-in").find((voice) => FEMALE_VOICE_HINT.test(voice.name)) ||
-    matches("en-in")[0] ||
+    enInVoices.find((voice) => FEMALE_VOICE_HINT.test(voice.name)) ||
+    enInVoices[0] ||
     (requireIndian
       ? undefined
       : matches("en").find((voice) => FEMALE_VOICE_HINT.test(voice.name)) || matches("en")[0])
@@ -93,6 +129,10 @@ export interface SpeakOptions {
   volume?: number;
   /** Reject generic non-Indian browser voices so a caller can use server audio. */
   requireIndianVoice?: boolean;
+  /** Prefer a calm, professional en-IN voice over a casual one. */
+  preferProfessional?: boolean;
+  /** Skip the cancel/restart pause when chaining chunks that already ended. */
+  skipCancelPause?: boolean;
   /** How long to wait for the browser to confirm playback before failing over. */
   startTimeoutMs?: number;
   onStart?: () => void;
@@ -131,7 +171,11 @@ export async function speakWithAccent(text: string, options: SpeakOptions = {}):
   }
 
   await waitForVoices();
-  const voice = pickAccentedVoice(options.lang ?? "en-IN", options.requireIndianVoice);
+  const voice = pickAccentedVoice(
+    options.lang ?? "en-IN",
+    options.requireIndianVoice,
+    options.preferProfessional,
+  );
   if (!voice) {
     options.onError?.();
     return empty;
@@ -176,9 +220,12 @@ export async function speakWithAccent(text: string, options: SpeakOptions = {}):
   };
   utterance.onerror = markFailed;
 
-  // Chrome sometimes drops a speak() that immediately follows cancel().
-  stopBrowserSpeech();
-  await new Promise((resolve) => setTimeout(resolve, 60));
+  // Chrome sometimes drops a speak() that immediately follows cancel(). When
+  // chaining sentences the previous utterance already ended, so skip that pause.
+  if (!options.skipCancelPause) {
+    stopBrowserSpeech();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+  }
 
   try {
     window.speechSynthesis.speak(utterance);

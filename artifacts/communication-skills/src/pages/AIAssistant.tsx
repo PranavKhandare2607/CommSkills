@@ -187,7 +187,7 @@ export default function AIAssistant() {
 
     const controller = new AbortController();
     speechAbortRef.current = controller;
-    const ok = await speakViaServer(text, {
+    const server = await speakViaServer(text, {
       voice: "en_US",
       signal: controller.signal,
       onStart: () => { if (generation === speechGenerationRef.current) setIsSpeaking(true); },
@@ -195,8 +195,8 @@ export default function AIAssistant() {
       onError: () => {},
     });
     if (speechAbortRef.current === controller) speechAbortRef.current = null;
-    if (!ok) clearState();
-    return ok;
+    if (!server.started) clearState();
+    return server.started;
   }, [stopCurrentSpeech]);
 
   const handleReadAloud = useCallback((text: string) => {

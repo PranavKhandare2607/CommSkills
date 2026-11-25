@@ -36,6 +36,7 @@ const normalize = (value: string) =>
   value.toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
 
 function asDefinitions(items: any[], pos: "verb" | "noun") {
+  const seen = new Set<string>();
   return (Array.isArray(items) ? items : [])
     .filter((item) => item && typeof item === "object")
     .map((item) => ({
@@ -43,16 +44,29 @@ function asDefinitions(items: any[], pos: "verb" | "noun") {
       definition: String(item.meaning ?? item.definition ?? "").trim(),
       example: String(item.example ?? "").trim(),
     }))
-    .filter((item) => item.definition.length > 0)
+    .filter((item) => {
+      const key = normalize(item.definition);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
     .slice(0, 2);
 }
 
+// The UI only shows two senses, so extra items from the model are fine as long
+// as there are two usable, distinct ones. Avoiding a retry for "too many"
+// keeps a lookup fast; the model is only asked again when it is truly short.
 function hasTwoDistinctEach(result: any): boolean {
-  const valid = (items: any[]) =>
-    Array.isArray(items) &&
-    items.length === 2 &&
-    items.every((item) => normalize(String(item?.meaning ?? "")) && normalize(String(item?.example ?? ""))) &&
-    normalize(String(items[0]?.meaning ?? "")) !== normalize(String(items[1]?.meaning ?? ""));
+  const valid = (items: any[]) => {
+    if (!Array.isArray(items)) return false;
+    const usable = items.filter(
+      (item) => normalize(String(item?.meaning ?? "")) && normalize(String(item?.example ?? "")),
+    );
+    return (
+      usable.length >= 2 &&
+      normalize(String(usable[0].meaning)) !== normalize(String(usable[1].meaning))
+    );
+  };
 
   return valid(result?.verbs) && valid(result?.nouns);
 }
@@ -73,6 +87,87 @@ function cleanWords(items: any[], headword: string): string[] {
     .slice(0, 6);
 }
 
+const DICTIONARY_URL = "https://api.dictionaryapi.dev/api/v2/entries/en";
+
+function exampleFromDefinition(word: string, definition: string): string {
+  const short = definition
+    .replace(/^\([^)]*\)\s*/, "")
+    .replace(/[.;:]\s*$/, "")
+    .slice(0, 110);
+  const lower = short.charAt(0).toLowerCase() + short.slice(1);
+  return `The word "${word}" can mean ${lower}.`;
+}
+
+/**
+ * Fast path: the free dictionary API returns structured senses in under a
+ * second, while the local model takes several seconds per lookup. Keep the
+ * exact same response shape so the UI does not change; use the model only
+ * when the dictionary has no usable verb/noun pair.
+ */
+async function lookupDictionary(word: string): Promise<any | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 2500);
+  try {
+    const response = await fetch(
+      `${DICTIONARY_URL}/${encodeURIComponent(word.trim().toLowerCase())}`,
+      { signal: controller.signal },
+    );
+    if (!response.ok) return null;
+    const entries: any = await response.json();
+    if (!Array.isArray(entries) || entries.length === 0) return null;
+
+    const collect = (pos: "verb" | "noun") => {
+      const picked: any[] = [];
+      const seen = new Set<string>();
+      for (const entry of entries) {
+        for (const meaning of entry?.meanings ?? []) {
+          if (String(meaning?.partOfSpeech ?? "").toLowerCase() !== pos) continue;
+          for (const def of meaning?.definitions ?? []) {
+            const text = String(def?.definition ?? "").trim();
+            const key = normalize(text);
+            if (!key || seen.has(key)) continue;
+            seen.add(key);
+            picked.push({
+              word,
+              meaning: text,
+              example: String(def?.example ?? "").trim() || exampleFromDefinition(word, text),
+            });
+            if (picked.length === 2) return picked;
+          }
+        }
+      }
+      return picked;
+    };
+
+    const verbs = collect("verb");
+    const nouns = collect("noun");
+    if (verbs.length < 2 || nouns.length < 2) return null;
+
+    const meanings = entries.flatMap((e: any) => Array.isArray(e?.meanings) ? e.meanings : []);
+    const definitions = meanings.flatMap((m: any) => Array.isArray(m?.definitions) ? m.definitions : []);
+    const phonetics = entries.flatMap((e: any) => Array.isArray(e?.phonetics) ? e.phonetics : []);
+    const pronunciation = String(
+      entries.find((e: any) => e?.phonetic)?.phonetic ??
+      phonetics.find((p: any) => p?.text)?.text ??
+      "",
+    );
+    const synonyms = [
+      ...meanings.flatMap((m: any) => Array.isArray(m?.synonyms) ? m.synonyms : []),
+      ...definitions.flatMap((d: any) => Array.isArray(d?.synonyms) ? d.synonyms : []),
+    ];
+    const antonyms = [
+      ...meanings.flatMap((m: any) => Array.isArray(m?.antonyms) ? m.antonyms : []),
+      ...definitions.flatMap((d: any) => Array.isArray(d?.antonyms) ? d.antonyms : []),
+    ];
+
+    return { found: true, word, pronunciation, verbs, nouns, synonyms, antonyms };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 router.post("/vocabulary/lookup", requireAuth, async (req, res) => {
   const userId = (req as typeof req & { userId: string }).userId;
   const usage = await checkAndIncrementUsage(userId, "vocabulary");
@@ -83,26 +178,35 @@ router.post("/vocabulary/lookup", requireAuth, async (req, res) => {
   const body = LookupVocabularyBody.parse(req.body);
 
   try {
-    let result: any = await chatJson({
-      system: VOCAB_SYSTEM,
-      messages: [{ role: "user", content: `Look up this word: ${body.word}` }],
-      maxTokens: 1200,
-      temperature: 0.1,
-    });
+    let result: any = await lookupDictionary(body.word);
 
-    // Retry once with the rejected draft attached so the model can replace
-    // repeated senses instead of regenerating the same answer.
-    if (result?.found !== false && !hasTwoDistinctEach(result)) {
+    if (!result) {
       result = await chatJson({
-        system: `${VOCAB_SYSTEM}\n\nCORRECTION: Rewrite the draft so each pair has two clearly DIFFERENT meanings (the common sense first, then a distinct second sense) with different example sentences. Do not include the headword in synonyms or antonyms.`,
-        messages: [{
-          role: "user",
-          // A nonce keeps the corrective call from replaying a cached bad answer.
-          content: `Look up "${body.word}" (retry ${Date.now()}). This draft repeats a meaning: ${JSON.stringify(result)}. Return the corrected full JSON with two distinct verb senses and two distinct noun senses.`,
-        }],
-        maxTokens: 1200,
-        temperature: 0,
+        system: VOCAB_SYSTEM,
+        messages: [{ role: "user", content: `Look up this word: ${body.word}` }],
+        maxTokens: 900,
+        temperature: 0.1,
       });
+
+      // Only retry when a pair is genuinely missing/duplicated. The correction
+      // asks for just the two arrays, so this second call stays short and fast.
+      if (result?.found !== false && !hasTwoDistinctEach(result)) {
+        const correction: any = await chatJson({
+          system:
+            "Return JSON with only \"verbs\" and \"nouns\", exactly 2 items each. " +
+            "Each item: { \"word\", \"meaning\", \"example\" }. Meanings must be DIFFERENT senses; examples must differ. Be concise.",
+          messages: [{
+            role: "user",
+            // A nonce keeps the corrective call from replaying a cached bad answer.
+            content: `Word: "${body.word}" (retry ${Date.now()}). Replace these weak pairs: ${JSON.stringify({ verbs: result?.verbs, nouns: result?.nouns })}`,
+          }],
+          maxTokens: 500,
+          temperature: 0,
+        });
+        if (correction && typeof correction === "object") {
+          result = { ...result, verbs: correction.verbs, nouns: correction.nouns };
+        }
+      }
     }
 
     const definitions = [

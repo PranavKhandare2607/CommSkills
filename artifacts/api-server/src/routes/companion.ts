@@ -370,14 +370,14 @@ router.post("/companion/speak", requireAuth, async (req, res) => {
     }
 
     const langKey = language === "hindi" || language === "hinglish" ? language : "english";
-    const voice = langKey === "hindi" ? "hi_IN" : "en_US";
+    const voice = langKey === "hindi" ? "hi_IN" : "en_IN";
 
-    const audioBuffer = await synthesizeSpeech(clean, voice);
+    const speech = await synthesizeSpeech(clean, voice);
 
-    res.setHeader("Content-Type", "audio/wav");
+    res.setHeader("Content-Type", speech.contentType);
     res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Content-Length", String(audioBuffer.length));
-    res.send(audioBuffer);
+    res.setHeader("Content-Length", String(speech.audio.length));
+    res.send(speech.audio);
   } catch (err: any) {
     console.error("Companion TTS error:", err?.message || err);
     if (!res.headersSent) {

@@ -518,15 +518,18 @@ export default function Companion() {
         ttsAbortRef.current = ctrl;
         setActiveVoiceName(lang === "hindi" ? "Indian Hindi voice" : lang === "hinglish" ? "Indian Hinglish voice" : "Indian English voice");
         try {
-          const ok = await speakViaServer(clean, {
-            voice: lang === "hindi" ? "hi_IN" : "en_US",
+          const attempt = await speakViaServer(clean, {
+            voice: lang === "hindi" ? "hi_IN" : "en_IN",
             signal: ctrl.signal,
             onStart: () => setIsSpeaking(true),
             onEnd: () => { if (generation === speechGenerationRef.current) finish(); },
             onError: () => {},
           });
           if (generation !== speechGenerationRef.current) return;
-          if (!ok) throw new Error("audio playback unavailable");
+          if (!attempt.started) throw new Error("audio playback unavailable");
+          // Wait for the audio to actually finish so the speaking animation
+          // stays alive for the whole reply instead of stopping at play().
+          await attempt.waitForEnd();
         } catch (err: any) {
           if (err?.name !== "AbortError" && generation === speechGenerationRef.current) {
             console.warn("[CommSkills] Server TTS failed:", err?.message || err);

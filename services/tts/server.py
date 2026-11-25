@@ -8,6 +8,7 @@ from collections import OrderedDict
 from contextlib import asynccontextmanager
 
 import uvicorn
+import edge_tts
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
 
@@ -25,6 +26,12 @@ VOICE_MAP = {
         os.getenv("TTS_VOICE_HI", "hi_IN-priyamvada-medium"),
         "hi/hi_IN/priyamvada/medium/hi_IN-priyamvada-medium",
     ),
+}
+
+# Piper has no Indian English voice. Microsoft's neural en-IN voice gives a
+# real Indian accent and needs no API key; Piper en_US remains the fallback.
+EDGE_VOICES = {
+    "en_IN": os.getenv("TTS_VOICE_EN_IN", "en-IN-NeerjaNeural"),
 }
 
 _default_key = "en_US"
@@ -90,6 +97,31 @@ def _synthesize(text: str, voice_key: str) -> bytes:
     return audio
 
 
+async def _edge_synthesize_async(text: str, voice_name: str) -> bytes:
+    chunks: list[bytes] = []
+    async for chunk in edge_tts.Communicate(text, voice_name, rate="-5%").stream():
+        if chunk.get("type") == "audio" and chunk.get("data"):
+            chunks.append(chunk["data"])
+    return b"".join(chunks)
+
+
+def _synthesize_edge_cached(text: str, voice_key: str) -> bytes:
+    """Synthesize with the neural Indian English voice, reusing the audio cache."""
+    cache_key = (voice_key, text)
+    cached = _audio_cache.get(cache_key)
+    if cached is not None:
+        _audio_cache.move_to_end(cache_key)
+        return cached
+
+    # to_thread() calls this from a worker thread, so a fresh loop is fine.
+    audio = asyncio.run(_edge_synthesize_async(text, EDGE_VOICES[voice_key]))
+    _audio_cache[cache_key] = audio
+    _audio_cache.move_to_end(cache_key)
+    while len(_audio_cache) > MAX_AUDIO_CACHE:
+        _audio_cache.popitem(last=False)
+    return audio
+
+
 def _preload() -> None:
     for key in VOICE_MAP:
         _load_voice(key)
@@ -112,7 +144,9 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "voices": {k: v[0] for k, v in VOICE_MAP.items()}}
+    voices = {k: v[0] for k, v in VOICE_MAP.items()}
+    voices.update(EDGE_VOICES)
+    return {"status": "ok", "voices": voices}
 
 
 @app.post("/speak")
@@ -122,15 +156,25 @@ async def speak(body: dict):
     if not isinstance(text, str) or not text.strip():
         raise HTTPException(status_code=400, detail="text is required")
 
-    if voice_key not in VOICE_MAP:
+    if voice_key not in VOICE_MAP and voice_key not in EDGE_VOICES:
         voice_key = _default_key
 
+    content_type = "audio/wav"
     try:
         # Keep the event loop free: synthesis blocks for a while on CPU.
-        audio = await asyncio.to_thread(_synthesize, text, voice_key)
+        if voice_key in EDGE_VOICES:
+            try:
+                audio = await asyncio.to_thread(_synthesize_edge_cached, text, voice_key)
+                content_type = "audio/mpeg"
+            except Exception as e:
+                # Neural voice needs network access; Piper still works offline.
+                print(f"Edge TTS failed, using Piper fallback: {e}", flush=True)
+                audio = await asyncio.to_thread(_synthesize, text, _default_key)
+        else:
+            audio = await asyncio.to_thread(_synthesize, text, voice_key)
         return Response(
             content=audio,
-            media_type="audio/wav",
+            media_type=content_type,
             headers={"Cache-Control": "public, max-age=3600"},
         )
     except HTTPException:

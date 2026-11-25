@@ -1,8 +1,13 @@
 const TTS_BASE_URL = process.env.TTS_BASE_URL ?? "http://tts:8080";
 
-export type TtsVoice = "en_US" | "hi_IN";
+export type TtsVoice = "en_US" | "hi_IN" | "en_IN";
 
-export async function synthesizeSpeech(text: string, voice: TtsVoice): Promise<Buffer> {
+export interface SynthesizedSpeech {
+  audio: Buffer;
+  contentType: string;
+}
+
+export async function synthesizeSpeech(text: string, voice: TtsVoice): Promise<SynthesizedSpeech> {
   const response = await fetch(`${TTS_BASE_URL}/speak`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -10,11 +15,14 @@ export async function synthesizeSpeech(text: string, voice: TtsVoice): Promise<B
   });
 
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`TTS service error: ${response.status} ${text}`);
+    const detail = await response.text();
+    throw new Error(`TTS service error: ${response.status} ${detail}`);
   }
 
-  return Buffer.from(await response.arrayBuffer());
+  return {
+    audio: Buffer.from(await response.arrayBuffer()),
+    contentType: response.headers.get("content-type") || "audio/wav",
+  };
 }
 
 export async function getTtsStatus(): Promise<{ ok: boolean; baseUrl: string; error?: string }> {

@@ -11,10 +11,10 @@ router.post("/tts/speak", requireAuth, async (req: Request, res: Response): Prom
       res.status(400).json({ error: "text is required" });
       return;
     }
-    const audioBuffer = await synthesizeSpeech(text, voice as TtsVoice);
-    res.setHeader("Content-Type", "audio/wav");
-    res.setHeader("Content-Length", audioBuffer.length.toString());
-    res.send(audioBuffer);
+    const speech = await synthesizeSpeech(text, voice as TtsVoice);
+    res.setHeader("Content-Type", speech.contentType);
+    res.setHeader("Content-Length", speech.audio.length.toString());
+    res.send(speech.audio);
   } catch (err: any) {
     console.error("TTS error:", err);
     res.status(500).json({ error: err.message || "Speech synthesis failed" });

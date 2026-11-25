@@ -6,7 +6,7 @@ import { apiUrl } from "@workspace/api-client-react";
  * `/api/tts/speak` only requires login, not a Premium subscription.
  */
 
-type ServerVoice = "en_US" | "hi_IN";
+type ServerVoice = "en_US" | "hi_IN" | "en_IN";
 
 export interface ServerSpeechOptions {
   voice?: ServerVoice;
@@ -16,13 +16,23 @@ export interface ServerSpeechOptions {
   onError?: () => void;
 }
 
+export interface ServerSpeechAttempt {
+  /** True only when the browser actually began playing the audio. */
+  started: boolean;
+  /** Resolves when playback finishes, fails, or is stopped. */
+  waitForEnd: () => Promise<void>;
+}
+
 let activeAudio: HTMLAudioElement | null = null;
 let activeUrl: string | null = null;
+let activeEnd: (() => void) | null = null;
 
 function releaseAudio(audio: HTMLAudioElement, url: string) {
   if (activeAudio === audio) {
     activeAudio = null;
     activeUrl = null;
+    activeEnd?.();
+    activeEnd = null;
   }
   try { URL.revokeObjectURL(url); } catch { /* ignore */ }
 }
@@ -37,20 +47,34 @@ export function stopServerSpeech(): void {
     } catch { /* ignore */ }
   }
   activeAudio = null;
+  activeEnd?.();
+  activeEnd = null;
   if (activeUrl) {
     try { URL.revokeObjectURL(activeUrl); } catch { /* ignore */ }
     activeUrl = null;
   }
 }
 
-/** Returns true when the browser accepted the audio for playback. */
-export function speakViaServer(text: string, options: ServerSpeechOptions = {}): Promise<boolean> {
-  return new Promise((resolve) => {
+/**
+ * Fetch and play server audio. Resolves as soon as playback starts so callers
+ * can report a failure immediately, while `waitForEnd()` keeps the caller's
+ * queue (and any speaking animation) alive until the audio actually finishes.
+ */
+export function speakViaServer(text: string, options: ServerSpeechOptions = {}): Promise<ServerSpeechAttempt> {
+  return new Promise<ServerSpeechAttempt>((resolveAttempt) => {
+    let resolveEnd!: () => void;
+    const ended = new Promise<void>((resolve) => { resolveEnd = resolve; });
+    const attempt = (started: boolean): ServerSpeechAttempt => ({ started, waitForEnd: () => ended });
     let settled = false;
-    const finish = (ok: boolean) => {
-      if (settled) return;
-      settled = true;
-      resolve(ok);
+    const finishAttempt = (started: boolean) => {
+      if (!settled) {
+        settled = true;
+        resolveAttempt(attempt(started));
+      }
+    };
+    const end = () => {
+      resolveEnd();
+      options.onEnd?.();
     };
 
     void (async () => {
@@ -62,9 +86,10 @@ export function speakViaServer(text: string, options: ServerSpeechOptions = {}):
           body: JSON.stringify({ text, voice: options.voice ?? "en_US" }),
           signal: options.signal,
         });
-        if (!response.ok) {
+        if (!response.ok || options.signal?.aborted) {
           options.onError?.();
-          finish(false);
+          finishAttempt(false);
+          resolveEnd();
           return;
         }
 
@@ -74,28 +99,41 @@ export function speakViaServer(text: string, options: ServerSpeechOptions = {}):
         const audio = new Audio(url);
         activeAudio = audio;
         activeUrl = url;
-        audio.onplay = () => options.onStart?.();
+        activeEnd = resolveEnd;
+
+        let notifiedStart = false;
+        const notifyStart = () => {
+          if (notifiedStart) return;
+          notifiedStart = true;
+          options.onStart?.();
+        };
+        audio.onplay = notifyStart;
         audio.onended = () => {
           releaseAudio(audio, url);
-          options.onEnd?.();
+          end();
         };
         audio.onerror = () => {
           releaseAudio(audio, url);
           options.onError?.();
-          finish(false);
+          finishAttempt(false);
+          resolveEnd();
         };
 
         try {
           await audio.play();
-          finish(true);
+          // Some browsers skip onplay; treat a resolved play() as started.
+          notifyStart();
+          finishAttempt(true);
         } catch {
           releaseAudio(audio, url);
           options.onError?.();
-          finish(false);
+          finishAttempt(false);
+          resolveEnd();
         }
       } catch (err: any) {
         if (err?.name !== "AbortError") options.onError?.();
-        finish(false);
+        finishAttempt(false);
+        resolveEnd();
       }
     })();
   });

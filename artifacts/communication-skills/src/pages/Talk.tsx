@@ -4,53 +4,106 @@ import { Mic, Square, Activity, Target, Zap } from "lucide-react";
 import { useSaveSpeakingSession, useUpdateProgress } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getGetProgressQueryKey } from "@workspace/api-client-react";
-import { useLocalRecorder } from "@/hooks/useLocalRecorder";
+import { createLiveSpeechRecognition } from "@/lib/speechRecognition";
 
 export default function Talk() {
   const [transcript, setTranscript] = useState("");
+  const [isListening, setIsListening] = useState(false);
   const [hasScored, setHasScored] = useState(false);
   const [startTime, setStartTime] = useState<number>(0);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  
+
+  const recognitionRef = useRef<any>(null);
+  const textRef = useRef("");
+  const finalTextRef = useRef("");
+
   const queryClient = useQueryClient();
   const { mutate: saveSession, data: result, isPending } = useSaveSpeakingSession();
   const { mutate: updateProgress } = useUpdateProgress();
 
-  const { state, transcript: recordedTranscript, isRecording, startRecording, stopRecording } = useLocalRecorder({
-    onTranscript: (text) => {
-      setTranscript(text);
-    },
-    onError: (message) => {
-      alert(message);
-    },
-    language: "en-IN",
-  });
+  useEffect(() => () => {
+    const recognition = recognitionRef.current;
+    if (!recognition) return;
+    recognition.onresult = null;
+    recognition.onend = null;
+    recognition.onerror = null;
+    try { recognition.abort?.(); } catch { /* ignore */ }
+  }, []);
 
-  useEffect(() => {
-    if (recordedTranscript) {
-      setTranscript(recordedTranscript);
+  const startRecording = useCallback(() => {
+    if (typeof window !== "undefined") window.speechSynthesis?.cancel();
+
+    const recognition = createLiveSpeechRecognition("en-IN");
+    recognition.lang = "en-IN";
+    recognition.interimResults = true;
+    recognition.continuous = true;
+    recognition.maxAlternatives = 3;
+    recognitionRef.current = recognition;
+    finalTextRef.current = "";
+    textRef.current = "";
+    setTranscript("");
+    setHasScored(false);
+    setStartTime(Date.now());
+
+    recognition.onstart = () => setIsListening(true);
+    recognition.onresult = (event: any) => {
+      let interim = "";
+      let final = "";
+      for (let i = 0; i < event.results.length; i++) {
+        const item = event.results[i];
+        if (item.isFinal) final += item[0]?.transcript ?? "";
+        else interim += item[0]?.transcript ?? "";
+      }
+      // `createLiveSpeechRecognition` reports all finalized words as one
+      // cumulative snapshot, so replace instead of appending to avoid repeats.
+      if (final) finalTextRef.current = final.trim();
+
+      // Show the words as they are spoken — not only after recording stops.
+      const combined = `${finalTextRef.current}${interim ? (finalTextRef.current ? " " : "") + interim : ""}`;
+      textRef.current = combined;
+      setTranscript(combined);
+    };
+    recognition.onerror = (event: any) => {
+      setIsListening(false);
+      if (event.error === "not-allowed") {
+        window.alert("Microphone permission denied. Allow mic access in your browser, then try again.");
+      }
+    };
+    recognition.onend = () => {
+      setIsListening(false);
+      const finalText = (textRef.current.trim() || finalTextRef.current.trim()).trim();
+      textRef.current = finalText;
+      setTranscript(finalText);
+    };
+
+    try {
+      recognition.start();
+    } catch {
+      setIsListening(false);
     }
-  }, [recordedTranscript]);
+  }, []);
+
+  const stopRecording = useCallback(() => {
+    recognitionRef.current?.stop?.();
+    setIsListening(false);
+  }, []);
 
   const toggleRecording = useCallback(() => {
-    if (isRecording) {
-      stopRecording();
-    } else {
-      startRecording();
-    }
-  }, [isRecording, startRecording, stopRecording]);
+    if (isListening) stopRecording();
+    else startRecording();
+  }, [isListening, startRecording, stopRecording]);
 
   const handleAnalyze = () => {
-    if (!transcript) return;
+    const spoken = (textRef.current || transcript).trim();
+    if (!spoken) return;
     setIsAnalyzing(true);
-    const words = transcript.trim().split(/\s+/).length;
-    const duration = Math.max(1, Math.round((Date.now() - (startTime || Date.now())) / 1000));
-    
+    const words = spoken.split(/\s+/).length;
+    const duration = Math.max(1, Math.round((Date.now() - startTime) / 1000));
+
     saveSession({
-      data: { transcript, wordCount: words, duration }
+      data: { transcript: spoken, wordCount: words, duration }
     }, {
       onSuccess: (res) => {
-        setStartTime(Date.now());
         if (!hasScored) {
           updateProgress({
             data: {
@@ -74,7 +127,7 @@ export default function Talk() {
   return (
     <div className="p-6 md:p-10 max-w-5xl mx-auto pb-20">
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
-        
+
         <div className="mb-10 text-center">
           <h1 className="text-4xl font-display font-bold text-slate-900 mb-3">Think Fast, Talk Smart</h1>
           <p className="text-slate-500 text-lg">Record yourself and get instant feedback on clarity, pacing, and word choice.</p>
@@ -82,7 +135,7 @@ export default function Talk() {
 
         <div className="bg-white rounded-3xl p-8 border border-slate-200 shadow-sm flex flex-col items-center mb-8 relative overflow-hidden">
           {/* Animated Background for Recording */}
-          {isRecording && (
+          {isListening && (
             <div className="absolute inset-0 flex items-center justify-center opacity-10 pointer-events-none">
               <div className="w-64 h-64 bg-rose-500 rounded-full blur-3xl animate-pulse"></div>
             </div>
@@ -91,27 +144,32 @@ export default function Talk() {
           <button
             onClick={toggleRecording}
             className={`w-24 h-24 rounded-full flex items-center justify-center text-white shadow-xl transition-all z-10 ${
-              isRecording 
-                ? 'bg-rose-500 shadow-rose-500/30 scale-110 animate-pulse' 
+              isListening
+                ? 'bg-rose-500 shadow-rose-500/30 scale-110 animate-pulse'
                 : 'bg-indigo-600 shadow-indigo-600/30 hover:scale-105 hover:bg-indigo-700'
             }`}
           >
-            {isRecording ? <Square className="w-8 h-8 fill-current" /> : <Mic className="w-10 h-10" />}
+            {isListening ? <Square className="w-8 h-8 fill-current" /> : <Mic className="w-10 h-10" />}
           </button>
-          
+
           <p className="mt-6 font-medium text-slate-600">
-            {isRecording ? "Listening... Click to stop" : "Press start to begin speaking"}
+            {isListening ? "Listening... your words appear below as you speak" : "Press start to begin speaking"}
           </p>
 
           <div className="w-full mt-8 bg-slate-50 border border-slate-100 rounded-2xl p-6 min-h-[150px]">
             {transcript ? (
-              <p className="text-slate-800 text-lg leading-relaxed">{transcript}</p>
+              <p className="text-slate-800 text-lg leading-relaxed">
+                {transcript}
+                {isListening && <span className="inline-block w-0.5 h-5 ml-1 bg-indigo-500 animate-pulse align-middle" />}
+              </p>
             ) : (
-              <p className="text-slate-400 text-center italic">Your words will appear here...</p>
+              <p className="text-slate-400 text-center italic">
+                {isListening ? "Listening... start speaking and your words will appear here" : "Your words will appear here as you speak..."}
+              </p>
             )}
           </div>
 
-          {!isRecording && transcript && !hasScored && (
+          {!isListening && transcript && !hasScored && (
             <button
               onClick={handleAnalyze}
               disabled={isPending || isAnalyzing}
@@ -123,9 +181,9 @@ export default function Talk() {
         </div>
 
         {result && hasScored && (
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }} 
-            animate={{ opacity: 1, y: 0 }} 
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
             className="grid grid-cols-1 md:grid-cols-3 gap-6"
           >
             <div className="bg-white rounded-2xl p-6 border border-rose-100 shadow-sm flex flex-col items-center text-center">
@@ -133,7 +191,7 @@ export default function Talk() {
               <p className="text-3xl font-display font-bold text-slate-900">{result.wordCount}</p>
               <p className="text-sm font-medium text-slate-500 uppercase tracking-wider mt-1">Words Spoken</p>
             </div>
-            
+
             <div className="bg-white rounded-2xl p-6 border border-emerald-100 shadow-sm flex flex-col items-center text-center">
               <Target className="w-8 h-8 text-emerald-500 mb-3" />
               <p className="text-3xl font-display font-bold text-slate-900">{result.clarityScore}%</p>

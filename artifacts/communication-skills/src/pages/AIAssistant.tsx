@@ -7,6 +7,7 @@ import {
 import { ChatMessage } from "@/components/chat/ChatMessage";
 import { useChatStream } from "@/hooks/use-chat-stream";
 import { createLiveSpeechRecognition } from "@/lib/speechRecognition";
+import { speakWithAccent } from "@/lib/speechSynthesis";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 
@@ -122,6 +123,7 @@ export default function AIAssistant() {
   const { messages, isGenerating, sendMessage, stopGeneration, clearChat } = useChatStream();
   const [input, setInput] = useState("");
   const [isMuted, setIsMuted] = useState(false);
+  const [speakingText, setSpeakingText] = useState("");
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [activeCategory, setActiveCategory] = useState("communication");
   const [showAllPrompts, setShowAllPrompts] = useState(false);
@@ -168,39 +170,24 @@ export default function AIAssistant() {
 
   const speakText = useCallback((text: string) => {
     window.speechSynthesis.cancel();
-    const clean = text.replace(/[*_#`>]/g, "").replace(/\n{2,}/g, ". ").trim();
-    const utterance = new SpeechSynthesisUtterance(clean);
-    utterance.lang = "en-IN";
-    utterance.rate = 0.95;
-    utterance.pitch = 1.1;
-    utterance.volume = 1;
-
-    // Pick the best Indian English female voice available
-    const voices = window.speechSynthesis.getVoices();
-    const isFemale = (name: string) => /female|woman|girl|heera|raveena|kalpana|priya|veena|aditi|leela|shelley|samantha|zira|susan|karen|tessa|fiona|moira|catherine|allison|ava|serena|victoria|rishi/i.test(name);
-
-    const preferred =
-      // 1. Indian English female voices (Google or system)
-      voices.find(v => v.lang === "en-IN" && isFemale(v.name)) ||
-      voices.find(v => v.lang.startsWith("en-IN") && isFemale(v.name)) ||
-      // 2. Any Indian English voice (Google's "Heera" or "Raveena" are female by default)
-      voices.find(v => v.lang === "en-IN" && v.name.toLowerCase().includes("google")) ||
-      voices.find(v => v.lang === "en-IN") ||
-      voices.find(v => v.lang.startsWith("en-IN")) ||
-      // 3. Fallback: any English female voice
-      voices.find(v => v.lang.startsWith("en") && isFemale(v.name)) ||
-      voices.find(v => v.lang.startsWith("en") && v.name.toLowerCase().includes("google")) ||
-      voices.find(v => v.lang.startsWith("en")) ||
-      voices[0];
-
-    if (preferred) utterance.voice = preferred;
-
-    utterance.onstart = () => setIsSpeaking(true);
-    utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = () => setIsSpeaking(false);
-
-    window.speechSynthesis.speak(utterance);
+    setSpeakingText(text);
+    speakWithAccent(text, {
+      lang: "en-IN",
+      onStart: () => setIsSpeaking(true),
+      onEnd: () => { setIsSpeaking(false); setSpeakingText(""); },
+      onError: () => { setIsSpeaking(false); setSpeakingText(""); },
+    });
   }, []);
+
+  const handleReadAloud = useCallback((text: string) => {
+    if (isSpeaking && speakingText === text) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+      setSpeakingText("");
+      return;
+    }
+    speakText(text);
+  }, [isSpeaking, speakingText, speakText]);
 
 const handleSend = useCallback((text: string = input) => {
     const trimmed = text.trim();
@@ -393,7 +380,12 @@ const handleSend = useCallback((text: string = input) => {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.25 }}
               >
-                <ChatMessage role={msg.role} text={msg.text} />
+                <ChatMessage
+                  role={msg.role}
+                  text={msg.text}
+                  onReadAloud={msg.role === "bot" && msg.text ? () => handleReadAloud(msg.text) : undefined}
+                  isSpeaking={msg.role === "bot" && isSpeaking && speakingText === msg.text}
+                />
               </motion.div>
             ))}
           </AnimatePresence>

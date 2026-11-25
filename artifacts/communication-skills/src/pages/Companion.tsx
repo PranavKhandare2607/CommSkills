@@ -8,6 +8,7 @@ import {
 import { cn } from "@/lib/utils";
 import { FemaleAvatar } from "@/components/companion/FemaleAvatar";
 import { createLiveSpeechRecognition } from "@/lib/speechRecognition";
+import { isBrowserSpeechSupported, pickAccentedVoice, speakWithAccent } from "@/lib/speechSynthesis";
 import {
   apiUrl,
   useScoreCompanionAnswer,
@@ -285,7 +286,9 @@ export default function Companion() {
   const interviewQuestionIndexRef = useRef(0);
   const sendMessageRef = useRef<((t: string) => void) | null>(null);
   const startListeningRef = useRef<(() => void) | null>(null);
-  // HTMLAudioElement for server-generated TTS playback (real Indian voice)
+  // Browser Indian-accent utterance (preferred); server audio is the fallback.
+  const activeUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  // HTMLAudioElement for server-generated TTS playback (fallback)
   const audioElRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
   const ttsAbortRef = useRef<AbortController | null>(null);
@@ -352,15 +355,17 @@ export default function Companion() {
   // source of the noticeable delay before audio started.
 
   // ============================================================
-  // SPEECH SYNTHESIS — Standard English Female (US/UK)
+  // SPEECH SYNTHESIS — Indian-accent female voice
   // ============================================================
-  // Cleanly stop any ongoing server-generated speech.
+  // Cleanly stop any ongoing speech (browser or server-generated).
   const stopAllSpeech = useCallback(() => {
     speechGenerationRef.current += 1;
     audioUnlockGenerationRef.current += 1;
     audioUnlockPromiseRef.current = null;
     ttsAbortRef.current?.abort();
     ttsAbortRef.current = null;
+    try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
+    activeUtteranceRef.current = null;
     audioResolveRef.current?.();
     audioResolveRef.current = null;
     if (audioElRef.current) {
@@ -461,13 +466,13 @@ export default function Companion() {
       }
 
       const lang = languageRef.current;
-      setActiveVoiceName(lang === "hindi" ? "Indian Hindi voice" : lang === "hinglish" ? "Indian Hinglish voice" : "Indian English voice");
       setVoiceError(null);
 
       let settled = false;
       const finish = () => {
         if (settled) return;
         settled = true;
+        activeUtteranceRef.current = null;
         if (audioResolveRef.current === finish) audioResolveRef.current = null;
         if (audioUrlRef.current) {
           URL.revokeObjectURL(audioUrlRef.current);
@@ -478,8 +483,35 @@ export default function Companion() {
       audioResolveRef.current = finish;
 
       const run = async () => {
+        // Prefer the browser's Indian English / Hindi voice. This matches the
+        // voice used by Buddy AI and avoids the US-accent server fallback.
+        if (isBrowserSpeechSupported()) {
+          const speechLang = lang === "hindi" ? "hi-IN" : "en-IN";
+          const voice = pickAccentedVoice(speechLang);
+          const label = lang === "hindi"
+            ? "Indian Hindi"
+            : lang === "hinglish"
+              ? "Indian English (Hinglish)"
+              : "Indian English";
+          setActiveVoiceName(`${label} voice${voice ? ` · ${voice.name}` : ""}`);
+
+          // Some browsers skip `onend` for long utterances; keep the queue moving.
+          const safetyTimer = setTimeout(finish, Math.max(10000, clean.length * 110));
+          activeUtteranceRef.current = speakWithAccent(clean, {
+            lang: speechLang,
+            rate: 0.96,
+            pitch: 1.05,
+            onStart: () => setIsSpeaking(true),
+            onEnd: () => { clearTimeout(safetyTimer); finish(); },
+            onError: () => { clearTimeout(safetyTimer); finish(); },
+          });
+          if (activeUtteranceRef.current) return;
+          clearTimeout(safetyTimer);
+        }
+
         const ctrl = new AbortController();
         ttsAbortRef.current = ctrl;
+        setActiveVoiceName(lang === "hindi" ? "Indian Hindi voice" : lang === "hinglish" ? "Indian Hinglish voice" : "Indian English voice");
         try {
           const res = await fetch(apiUrl("/api/companion/speak"), {
             method: "POST",

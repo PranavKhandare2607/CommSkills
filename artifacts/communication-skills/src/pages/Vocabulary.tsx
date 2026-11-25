@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { motion } from "framer-motion";
 import { Sparkles, Search, Volume2, BookA, BookmarkPlus } from "lucide-react";
 import { useLookupVocabulary, useUpdateProgress } from "@workspace/api-client-react";
+import { cn } from "@/lib/utils";
 import { useQueryClient } from "@tanstack/react-query";
 import { getGetProgressQueryKey } from "@workspace/api-client-react";
 
@@ -10,6 +11,14 @@ export default function Vocabulary() {
   const { mutate: lookup, data: result, isPending } = useLookupVocabulary();
   const { mutate: updateProgress } = useUpdateProgress();
   const queryClient = useQueryClient();
+
+  const definitions = result?.found ? result.definitions : [];
+  const verbs = definitions.filter(d => d.partOfSpeech.toLowerCase().startsWith("verb"));
+  const nouns = definitions.filter(d => d.partOfSpeech.toLowerCase().startsWith("noun"));
+  const others = definitions.filter(d => {
+    const pos = d.partOfSpeech.toLowerCase();
+    return !pos.startsWith("verb") && !pos.startsWith("noun");
+  });
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -95,20 +104,31 @@ export default function Vocabulary() {
               </button>
             </div>
 
-            <div className="space-y-6">
-              {result.definitions.map((def, i) => (
-                <div key={i} className="border-l-4 border-amber-400 pl-4 py-1">
-                  <span className="inline-block px-2 py-0.5 bg-slate-100 text-slate-600 text-xs font-bold uppercase rounded mb-2">
-                    {def.partOfSpeech}
-                  </span>
-                  <p className="text-slate-800 text-lg font-medium mb-2">{def.definition}</p>
-                  {def.example && (
-                    <p className="text-slate-500 italic flex gap-2">
-                      <span className="text-amber-400 font-serif">"</span>
-                      {def.example}
-                      <span className="text-amber-400 font-serif">"</span>
-                    </p>
-                  )}
+            <div className="space-y-8">
+              {[
+                { label: "Verbs", items: verbs, border: "border-indigo-400", badge: "bg-indigo-100 text-indigo-700" },
+                { label: "Nouns", items: nouns, border: "border-amber-400", badge: "bg-amber-100 text-amber-700" },
+                { label: "Other uses", items: others, border: "border-slate-300", badge: "bg-slate-100 text-slate-600" },
+              ].filter(section => section.items.length > 0).map(section => (
+                <div key={section.label}>
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-4 flex items-center gap-2">
+                    <span className={cn("px-2.5 py-1 rounded-md", section.badge)}>{section.label}</span>
+                    <span className="text-xs font-medium text-slate-400">({section.items.length})</span>
+                  </h3>
+                  <div className="space-y-4">
+                    {section.items.map((def, i) => (
+                      <div key={i} className={cn("border-l-4 pl-4 py-1", section.border)}>
+                        <p className="text-slate-800 text-lg font-medium mb-2">{def.definition}</p>
+                        {def.example && (
+                          <p className="text-slate-500 italic flex gap-2">
+                            <span className="text-amber-400 font-serif">"</span>
+                            {def.example}
+                            <span className="text-amber-400 font-serif">"</span>
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ))}
             </div>

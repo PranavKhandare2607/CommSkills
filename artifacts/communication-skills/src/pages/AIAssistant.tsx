@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { ChatMessage } from "@/components/chat/ChatMessage";
 import { useChatStream } from "@/hooks/use-chat-stream";
-import { useLocalRecorder } from "@/hooks/useLocalRecorder";
+import { createLiveSpeechRecognition } from "@/lib/speechRecognition";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 
@@ -130,18 +130,23 @@ export default function AIAssistant() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lastSpokenIdRef = useRef<string>("");
 
-  const { state, transcript, isRecording, startRecording, stopRecording, toggleRecording } = useLocalRecorder({
-    onTranscript: (text) => {
-      setInput(text);
-      if (voiceMode) {
-        setTimeout(() => handleSend(text.trim()), 100);
-      }
-    },
-    onError: (message) => {
-      alert(message);
-    },
-    language: "en-IN",
-  });
+  const [isRecording, setIsRecording] = useState(false);
+  const recognitionRef = useRef<any>(null);
+  const finalTextRef = useRef("");
+  const inputRef = useRef("");
+  const voiceModeRef = useRef(false);
+  const shouldSendRef = useRef(false);
+  useEffect(() => { inputRef.current = input; }, [input]);
+  useEffect(() => { voiceModeRef.current = voiceMode; }, [voiceMode]);
+  useEffect(() => () => {
+    const rec = recognitionRef.current;
+    if (!rec) return;
+    shouldSendRef.current = false;
+    rec.onresult = null;
+    rec.onend = null;
+    rec.onerror = null;
+    try { rec.abort?.(); } catch { /* ignore */ }
+  }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -206,6 +211,71 @@ const handleSend = useCallback((text: string = input) => {
     if (textareaRef.current) textareaRef.current.style.height = "auto";
   }, [input, isGenerating, sendMessage]);
 
+  const startRecording = useCallback(() => {
+    if (isGenerating) return;
+    window.speechSynthesis.cancel();
+
+    const recognition = createLiveSpeechRecognition("en-US");
+    recognition.lang = "en-US";
+    recognition.interimResults = true;
+    recognition.continuous = false;
+    recognition.maxAlternatives = 3;
+    recognitionRef.current = recognition;
+    finalTextRef.current = "";
+    shouldSendRef.current = voiceModeRef.current;
+
+    recognition.onstart = () => setIsRecording(true);
+    recognition.onresult = (event: any) => {
+      let interim = "";
+      let final = "";
+      for (let i = 0; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) final += result[0]?.transcript ?? "";
+        else interim += result[0]?.transcript ?? "";
+      }
+      if (final) finalTextRef.current = final;
+      // Words appear in the chat input while the user is still speaking.
+      const combined = final || interim;
+      inputRef.current = combined;
+      setInput(combined);
+      if (textareaRef.current) {
+        textareaRef.current.style.height = "auto";
+        textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 128)}px`;
+      }
+    };
+    recognition.onerror = (event: any) => {
+      setIsRecording(false);
+      if (event.error === "not-allowed") {
+        alert("Microphone permission denied. Allow mic access in your browser, then try again.");
+      }
+    };
+    recognition.onend = () => {
+      setIsRecording(false);
+      const text = (finalTextRef.current || inputRef.current).trim();
+      if (shouldSendRef.current && text) {
+        setTimeout(() => handleSend(text), 50);
+      }
+      shouldSendRef.current = false;
+    };
+
+    try {
+      recognition.start();
+    } catch {
+      setIsRecording(false);
+    }
+  }, [handleSend, isGenerating]);
+
+  const stopRecording = useCallback(() => {
+    shouldSendRef.current = shouldSendRef.current || voiceModeRef.current;
+    recognitionRef.current?.stop?.();
+    setIsRecording(false);
+  }, []);
+
+  const toggleRecording = useCallback(() => {
+    if (isRecording) stopRecording();
+    else startRecording();
+  }, [isRecording, startRecording, stopRecording]);
+
   const toggleMute = useCallback(() => {
     window.speechSynthesis.cancel();
     setIsSpeaking(false);
@@ -214,8 +284,11 @@ const handleSend = useCallback((text: string = input) => {
 
   const toggleVoiceMode = useCallback(() => {
     const next = !voiceMode;
+    // Keep the ref in sync synchronously so startRecording() sees the new mode.
+    voiceModeRef.current = next;
     setVoiceMode(next);
     if (!next) {
+      shouldSendRef.current = false;
       stopRecording();
     } else if (!isGenerating) {
       void startRecording();
@@ -401,7 +474,7 @@ const handleSend = useCallback((text: string = input) => {
           {isRecording && (
             <div className="mb-2 flex items-center gap-2 text-rose-600 text-xs font-medium">
               <span className="w-2 h-2 bg-rose-500 rounded-full animate-pulse" />
-              Listening... speak clearly, then stop to send
+              Listening... your words appear in the box below
               {voiceMode && <span className="text-slate-400">(auto-send when done)</span>}
             </div>
           )}

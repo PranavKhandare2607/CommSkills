@@ -120,7 +120,7 @@ export default function Grammar() {
                 {result.explanation}
               </p>
               
-              {result.improvements.length > 0 && (
+              {Array.isArray(result.improvements) && result.improvements.length > 0 && (
                 <ul className="space-y-2">
                   {result.improvements.map((imp, i) => (
                     <li key={i} className="flex items-start gap-2">

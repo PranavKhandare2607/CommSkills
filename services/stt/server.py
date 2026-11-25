@@ -7,12 +7,29 @@ import uvicorn
 from fastapi import FastAPI, File, HTTPException, UploadFile
 
 _model = None
-_model_name = os.getenv("STT_MODEL", "base")
+# "small" is a good accuracy/latency balance on CPU for English voice input.
+_model_name = os.getenv("STT_MODEL", "small")
 _device = os.getenv("STT_DEVICE", "cpu")
 _compute_type = os.getenv("STT_COMPUTE_TYPE", "int8")
-# Greedy decoding is several times faster than beam search with a small
-# accuracy trade-off, which is worth it for voice UI responsiveness.
-_beam_size = int(os.getenv("STT_BEAM_SIZE", "1"))
+# Beam search improves transcription accuracy noticeably, especially for
+# English interview/conversation answers. Keep it configurable for slower CPUs.
+_beam_size = int(os.getenv("STT_BEAM_SIZE", "5"))
+# Bias the decoder toward proper English and common interview vocabulary.
+_en_initial_prompt = (
+    "This is clear spoken English in a job interview or friendly conversation. "
+    "Use correct English spelling, punctuation, and full words. Common terms: "
+    "experience, skills, strength, project, team, manager, result, challenge, "
+    "situation, task, action, communication, career, role, responsibility."
+)
+
+
+def _language_hint(language: str | None) -> str | None:
+    if not language:
+        return None
+    value = language.strip().lower().replace("-", "_")
+    if not value:
+        return None
+    return value.split("_")[0]
 
 
 def get_model():
@@ -38,12 +55,22 @@ async def health():
     return {"status": "ok", "model": _model_name}
 
 
-def _transcribe_file(path: str):
-    return get_model().transcribe(path, beam_size=_beam_size)
+def _transcribe_file(path: str, language: str | None):
+    # Condition the model on English for higher accuracy. VAD filters silence
+    # and background noise so the transcript doesn't invent words from noise.
+    return get_model().transcribe(
+        path,
+        language=language,
+        beam_size=_beam_size,
+        vad_filter=True,
+        vad_parameters={"min_silence_duration_ms": 300},
+        initial_prompt=_en_initial_prompt if language == "en" else None,
+        condition_on_previous_text=False,
+    )
 
 
 @app.post("/transcribe")
-async def transcribe(file: UploadFile = File(...)):
+async def transcribe(file: UploadFile = File(...), language: str | None = None):
     suffix = os.path.splitext(file.filename or "audio.webm")[1] or ".webm"
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         tmp.write(await file.read())
@@ -51,7 +78,7 @@ async def transcribe(file: UploadFile = File(...)):
 
     try:
         # faster-whisper is synchronous; keep FastAPI's event loop responsive.
-        segments, info = await asyncio.to_thread(_transcribe_file, tmp_path)
+        segments, info = await asyncio.to_thread(_transcribe_file, tmp_path, _language_hint(language))
         text = " ".join(segment.text for segment in segments).strip()
         return {
             "text": text,

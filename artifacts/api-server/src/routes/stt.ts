@@ -15,7 +15,11 @@ router.post("/stt/transcribe", requireAuth, upload.single("file"), async (req: R
     }
     const audioBuffer = req.file.buffer;
     const filename = req.file.originalname ?? "audio.webm";
-    const result = await transcribeAudio(audioBuffer, filename);
+    const requestedLanguage = typeof req.body?.language === "string" ? req.body.language.trim() : "";
+    const language = requestedLanguage
+      ? requestedLanguage.replace(/-/g, "_").split("_")[0]
+      : undefined;
+    const result = await transcribeAudio(audioBuffer, filename, language);
     res.json(result);
   } catch (err: any) {
     console.error("STT error:", err);

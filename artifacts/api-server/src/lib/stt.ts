@@ -6,9 +6,10 @@ export interface TranscribeResult {
   duration?: number;
 }
 
-export async function transcribeAudio(audioBuffer: Buffer, filename = "audio.webm"): Promise<TranscribeResult> {
+export async function transcribeAudio(audioBuffer: Buffer, filename = "audio.webm", language?: string): Promise<TranscribeResult> {
   const formData = new FormData();
   formData.append("file", new Blob([new Uint8Array(audioBuffer)], { type: "audio/webm" }), filename);
+  if (language) formData.append("language", language);
 
   const response = await fetch(`${STT_BASE_URL}/transcribe`, {
     method: "POST",

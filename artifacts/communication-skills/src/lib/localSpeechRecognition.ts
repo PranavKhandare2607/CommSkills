@@ -19,6 +19,7 @@ export interface LocalSpeechRecognition {
   interimResults: boolean;
   continuous: boolean;
   maxAlternatives: number;
+  abort?: () => void;
   onstart: (() => void) | null;
   onresult: ((event: any) => void) | null;
   onerror: ((event: any) => void) | null;
@@ -158,6 +159,17 @@ export function createLocalSpeechRecognition(): LocalSpeechRecognition {
       rec._stopRequested = true;
       releaseStream();
     }
+  };
+
+  rec.abort = () => {
+    rec.__commSkillsDiscardResult = true;
+    if (rec._recorder && rec._recorder.state !== "inactive") {
+      rec._recorder.onstop = null;
+      rec._recorder.stop();
+    }
+    rec._chunks = [];
+    rec._recorder = null;
+    releaseStream();
   };
 
   return rec as LocalSpeechRecognition;

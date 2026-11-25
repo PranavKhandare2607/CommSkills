@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FemaleAvatar } from "@/components/companion/FemaleAvatar";
-import { createLocalSpeechRecognition } from "@/lib/localSpeechRecognition";
+import { createLiveSpeechRecognition } from "@/lib/speechRecognition";
 import {
   apiUrl,
   useScoreCompanionAnswer,
@@ -226,6 +226,8 @@ export default function Companion() {
   const [mode, setMode] = useState<Mode>("interview");
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
+  const inputRef = useRef("");
+  useEffect(() => { inputRef.current = input; }, [input]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const speechRecognitionSupported =
@@ -674,29 +676,20 @@ export default function Companion() {
       alert("Voice input isn't supported in this browser. Please type instead.");
       return;
     }
-    try {
-      const s = await navigator.mediaDevices.getUserMedia({ audio: true });
-      s.getTracks().forEach(t => t.stop());
-    } catch (err: any) {
-      if (err.name === "NotAllowedError") {
-        alert("Microphone blocked. Please allow microphone access.");
-      } else {
-        alert(`Mic error: ${err.message}`);
-      }
-      return;
-    }
+    // The recognizer requests microphone access itself (browser Web Speech or
+    // the local MediaRecorder adapter), so no separate getUserMedia probe is
+    // needed here — a probe would prompt twice and block the live engine.
     stopAllSpeech();
 
-    const recognition = createLocalSpeechRecognition();
+    const recognition = createLiveSpeechRecognition();
     recognitionRef.current = recognition;
-    // Use the user's selected language for speech recognition.
-    // Hindi → hi-IN. Hinglish → en-IN (better for Roman-script speakers who mix Hindi+English).
-    // English → en-IN (Indian English accent — much better than en-US for Indian users).
+    // English uses en-US for the best recognition accuracy. Hindi uses hi-IN,
+    // and Hinglish uses en-IN (Roman script with Indian English pronunciation).
     const lang = languageRef.current;
-    recognition.lang = lang === "hindi" ? "hi-IN" : lang === "hinglish" ? "en-IN" : "en-IN";
+    recognition.lang = lang === "hindi" ? "hi-IN" : lang === "hinglish" ? "en-IN" : "en-US";
     recognition.interimResults = true;
     recognition.continuous = false;
-    recognition.maxAlternatives = 1;
+    recognition.maxAlternatives = 3;
 
     let finalT = "";
     recognition.onstart = () => {
@@ -706,11 +699,15 @@ export default function Companion() {
     };
     recognition.onresult = (event: any) => {
       let interim = "";
-      finalT = "";
+      let final = "";
       for (let i = 0; i < event.results.length; i++) {
-        if (event.results[i].isFinal) finalT += event.results[i][0].transcript;
-        else interim += event.results[i][0].transcript;
+        const result = event.results[i];
+        if (result.isFinal) final += result[0]?.transcript ?? "";
+        else interim += result[0]?.transcript ?? "";
       }
+      // Final result replaces the live interim text; interim text updates the
+      // input box in real time while the user is still speaking.
+      if (final) finalT = final;
       setInput(finalT || interim);
     };
     recognition.onerror = (event: any) => {
@@ -733,7 +730,7 @@ export default function Companion() {
         setInput("");
         return;
       }
-      const txt = finalT.trim();
+      const txt = finalT.trim() || inputRef.current.trim();
       if (voiceModeRef.current && txt) {
         if (isLikelyAssistantEcho(txt, latestAssistantSpeechRef.current)) {
           setInput("");
@@ -762,7 +759,8 @@ export default function Companion() {
     if (recognition && isListeningRef.current && discard) {
       recognition.__commSkillsDiscardResult = true;
     }
-    recognition?.stop();
+    if (recognition && isListeningRef.current && discard && recognition.abort) recognition.abort();
+    else recognition?.stop();
     isListeningRef.current = false;
     setIsListening(false);
   }, []);
@@ -1681,9 +1679,14 @@ export default function Companion() {
                         handleSend();
                       }
                     }}
-                    placeholder={mode === "interview" ? "Type or speak your answer..." : "Say something to Priya..."}
+                    placeholder={isListening ? "Listening... your words appear here" : mode === "interview" ? "Type or speak your answer..." : "Say something to Priya..."}
                     rows={1}
-                    className="flex-1 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm resize-none focus:outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                    className={cn(
+                      "flex-1 px-4 py-3 rounded-xl border bg-white text-sm resize-none focus:outline-none focus:ring-2",
+                      isListening
+                        ? "border-rose-300 ring-rose-100 text-slate-900"
+                        : "border-slate-200 focus:border-indigo-400 focus:ring-indigo-100"
+                    )}
                     disabled={isStreaming}
                   />
                   <button
@@ -1893,6 +1896,15 @@ export default function Companion() {
                     <span className="text-white/60">Voice typing isn't supported on this browser — type below instead</span>
                   )}
                 </div>
+                {isListening && input.trim() && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="mt-3 w-full max-w-md mx-auto px-4 py-2 rounded-xl bg-slate-900/60 border border-white/10 text-white/90 text-sm text-center leading-relaxed"
+                  >
+                    {input}
+                  </motion.div>
+                )}
               </div>
 
               {/* Text fallback is always available, including browsers where

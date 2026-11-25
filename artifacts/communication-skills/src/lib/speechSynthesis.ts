@@ -4,8 +4,8 @@
  * Chrome/Edge on Indian systems expose voices such as "Microsoft Heera",
  * "Microsoft Raveena" or Google's en-IN voice. Preferring them gives Buddy AI
  * and the AI Companion a natural Indian accent without sending audio to a
- * third-party service. If no en-IN voice exists, we fall back to any English
- * voice and let the browser apply its closest locale match.
+ * third-party service. If no Indian voice exists (or speech is blocked) the
+ * caller gets `started: false` and can fall back to server-generated audio.
  */
 
 const FEMALE_VOICE_HINT =
@@ -22,6 +22,23 @@ export function isBrowserSpeechSupported(): boolean {
 export function getSpeechVoices(): SpeechSynthesisVoice[] {
   if (!isBrowserSpeechSupported()) return [];
   return window.speechSynthesis.getVoices() || [];
+}
+
+/** Voices load asynchronously in Chrome; wait briefly before deciding. */
+export function waitForVoices(timeoutMs = 900): Promise<void> {
+  if (!isBrowserSpeechSupported() || getSpeechVoices().length > 0) return Promise.resolve();
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      window.speechSynthesis.removeEventListener?.("voiceschanged", finish);
+      clearTimeout(timer);
+      resolve();
+    };
+    window.speechSynthesis.addEventListener?.("voiceschanged", finish);
+    const timer = setTimeout(finish, timeoutMs);
+  });
 }
 
 /** Pick the most natural Indian voice for the requested language. */
@@ -71,34 +88,108 @@ export interface SpeakOptions {
   onError?: () => void;
 }
 
-/**
- * Speak `text` with an Indian-accent voice and report when playback ends.
- * Returns null when the browser has no speech synthesis support (callers can
- * then fall back to server-generated audio).
- */
-export function speakWithAccent(text: string, options: SpeakOptions = {}): SpeechSynthesisUtterance | null {
-  if (!isBrowserSpeechSupported()) {
-    options.onEnd?.();
-    return null;
-  }
+export interface SpeechAttempt {
+  utterance: SpeechSynthesisUtterance | null;
+  /** True only when the browser actually began speaking. */
+  started: boolean;
+  /** Resolves when playback ends (or fails). */
+  waitForEnd: () => Promise<void>;
+}
 
+export function stopBrowserSpeech(): void {
+  if (!isBrowserSpeechSupported()) return;
+  try { window.speechSynthesis.cancel(); } catch { /* ignore */ }
+}
+
+/**
+ * Speak `text` with the best available voice. Resolves once the browser
+ * confirms playback started (or reports that it cannot) so callers can fall
+ * back to server audio when speech is unavailable or blocked.
+ */
+export async function speakWithAccent(text: string, options: SpeakOptions = {}): Promise<SpeechAttempt> {
+  const empty: SpeechAttempt = { utterance: null, started: false, waitForEnd: async () => {} };
   const clean = cleanSpeechText(text);
   if (!clean) {
     options.onEnd?.();
-    return null;
+    return empty;
+  }
+  if (!isBrowserSpeechSupported()) {
+    options.onError?.();
+    return empty;
   }
 
-  const utterance = new SpeechSynthesisUtterance(clean);
+  await waitForVoices();
   const voice = pickAccentedVoice(options.lang ?? "en-IN");
-  if (voice) utterance.voice = voice;
-  utterance.lang = voice?.lang || options.lang || "en-IN";
+  if (!voice) {
+    options.onError?.();
+    return empty;
+  }
+
+  let resolveStarted!: (started: boolean) => void;
+  let resolveEnded!: () => void;
+  const startedPromise = new Promise<boolean>((resolve) => { resolveStarted = resolve; });
+  const endedPromise = new Promise<void>((resolve) => { resolveEnded = resolve; });
+
+  const utterance = new SpeechSynthesisUtterance(clean);
+  utterance.voice = voice;
+  // Use the voice's real locale. Forcing "en-IN" when no such voice exists
+  // makes Chrome silently drop the utterance.
+  utterance.lang = voice.lang || options.lang || "en-IN";
   utterance.rate = options.rate ?? 0.95;
   utterance.pitch = options.pitch ?? 1.05;
   utterance.volume = 1;
-  utterance.onstart = () => options.onStart?.();
-  utterance.onend = () => options.onEnd?.();
-  utterance.onerror = () => options.onError?.();
 
-  window.speechSynthesis.speak(utterance);
-  return utterance;
+  let settled = false;
+  const markStarted = () => {
+    if (!settled) {
+      settled = true;
+      resolveStarted(true);
+    }
+    options.onStart?.();
+  };
+  const markFailed = () => {
+    if (!settled) {
+      settled = true;
+      resolveStarted(false);
+    }
+    resolveEnded();
+    options.onError?.();
+  };
+
+  utterance.onstart = markStarted;
+  utterance.onend = () => {
+    markStarted();
+    resolveEnded();
+    options.onEnd?.();
+  };
+  utterance.onerror = markFailed;
+
+  // Chrome sometimes drops a speak() that immediately follows cancel().
+  stopBrowserSpeech();
+  await new Promise((resolve) => setTimeout(resolve, 60));
+
+  try {
+    window.speechSynthesis.speak(utterance);
+  } catch {
+    markFailed();
+    return { utterance, started: false, waitForEnd: () => endedPromise };
+  }
+
+  // Some browsers never fire onstart/onerror when audio is blocked.
+  const guard = setTimeout(() => {
+    if (!settled) {
+      settled = true;
+      resolveStarted(false);
+      resolveEnded();
+      stopBrowserSpeech();
+      options.onError?.();
+    }
+  }, 1500);
+  void startedPromise.then(() => clearTimeout(guard));
+
+  return {
+    utterance,
+    started: await startedPromise,
+    waitForEnd: () => endedPromise,
+  };
 }

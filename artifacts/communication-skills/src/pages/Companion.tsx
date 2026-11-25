@@ -8,7 +8,8 @@ import {
 import { cn } from "@/lib/utils";
 import { FemaleAvatar } from "@/components/companion/FemaleAvatar";
 import { createLiveSpeechRecognition } from "@/lib/speechRecognition";
-import { isBrowserSpeechSupported, pickAccentedVoice, speakWithAccent } from "@/lib/speechSynthesis";
+import { speakWithAccent, stopBrowserSpeech } from "@/lib/speechSynthesis";
+import { speakViaServer, stopServerSpeech } from "@/lib/serverTts";
 import {
   apiUrl,
   useScoreCompanionAnswer,
@@ -364,7 +365,8 @@ export default function Companion() {
     audioUnlockPromiseRef.current = null;
     ttsAbortRef.current?.abort();
     ttsAbortRef.current = null;
-    try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
+    stopBrowserSpeech();
+    stopServerSpeech();
     activeUtteranceRef.current = null;
     audioResolveRef.current?.();
     audioResolveRef.current = null;
@@ -483,85 +485,56 @@ export default function Companion() {
       audioResolveRef.current = finish;
 
       const run = async () => {
-        // Prefer the browser's Indian English / Hindi voice. This matches the
-        // voice used by Buddy AI and avoids the US-accent server fallback.
-        if (isBrowserSpeechSupported()) {
-          const speechLang = lang === "hindi" ? "hi-IN" : "en-IN";
-          const voice = pickAccentedVoice(speechLang);
-          const label = lang === "hindi"
-            ? "Indian Hindi"
-            : lang === "hinglish"
-              ? "Indian English (Hinglish)"
-              : "Indian English";
-          setActiveVoiceName(`${label} voice${voice ? ` · ${voice.name}` : ""}`);
+        const speechLang = lang === "hindi" ? "hi-IN" : "en-IN";
+        const label = lang === "hindi"
+          ? "Indian Hindi"
+          : lang === "hinglish"
+            ? "Indian English (Hinglish)"
+            : "Indian English";
+        setActiveVoiceName(`${label} voice`);
 
+        // 1. Try the browser's Indian voice first. `started` is true only when
+        //    real audio began — a missing/blocked voice falls through below.
+        let safetyTimer: ReturnType<typeof setTimeout> | null = null;
+        const attempt = await speakWithAccent(clean, {
+          lang: speechLang,
+          rate: 0.96,
+          pitch: 1.05,
+          onStart: () => setIsSpeaking(true),
+          onEnd: () => { if (safetyTimer) clearTimeout(safetyTimer); finish(); },
+          onError: () => {},
+        });
+        activeUtteranceRef.current = attempt.utterance;
+        if (generation !== speechGenerationRef.current) return;
+        if (attempt.started) {
           // Some browsers skip `onend` for long utterances; keep the queue moving.
-          const safetyTimer = setTimeout(finish, Math.max(10000, clean.length * 110));
-          activeUtteranceRef.current = speakWithAccent(clean, {
-            lang: speechLang,
-            rate: 0.96,
-            pitch: 1.05,
-            onStart: () => setIsSpeaking(true),
-            onEnd: () => { clearTimeout(safetyTimer); finish(); },
-            onError: () => { clearTimeout(safetyTimer); finish(); },
-          });
-          if (activeUtteranceRef.current) return;
-          clearTimeout(safetyTimer);
+          safetyTimer = setTimeout(finish, Math.max(10000, clean.length * 110));
+          return;
         }
 
+        // 2. Server audio fallback. Uses /api/tts/speak (login only) so it also
+        //    works when the Premium-gated companion endpoint is unavailable.
         const ctrl = new AbortController();
         ttsAbortRef.current = ctrl;
         setActiveVoiceName(lang === "hindi" ? "Indian Hindi voice" : lang === "hinglish" ? "Indian Hinglish voice" : "Indian English voice");
         try {
-          const res = await fetch(apiUrl("/api/companion/speak"), {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            credentials: "include",
-            body: JSON.stringify({ text: clean, language: lang, mode }),
+          const ok = await speakViaServer(clean, {
+            voice: lang === "hindi" ? "hi_IN" : "en_US",
             signal: ctrl.signal,
+            onStart: () => setIsSpeaking(true),
+            onEnd: () => { if (generation === speechGenerationRef.current) finish(); },
+            onError: () => {},
           });
-          if (!res.ok) {
-            let detail = "";
-            try {
-              const payload = await res.json();
-              detail = typeof payload?.error === "string" ? payload.error : "";
-            } catch {}
-            throw new Error(detail || `TTS HTTP ${res.status}`);
-          }
-          const blob = await res.blob();
-          if (ctrl.signal.aborted || generation !== speechGenerationRef.current) {
-            finish();
-            return;
-          }
-
-          const url = URL.createObjectURL(blob);
-          audioUrlRef.current = url;
-          if (!audioElRef.current) audioElRef.current = new Audio();
-          const audio = audioElRef.current;
-          audio.src = url;
-          audio.onplay = () => setIsSpeaking(true);
-          audio.onended = finish;
-          audio.onerror = () => {
-            setVoiceError("The AI voice audio could not be played. The text reply is still available.");
-            finish();
-          };
-          try {
-            await audio.play();
-          } catch (playErr) {
-            if (!ctrl.signal.aborted) {
-              console.warn("[CommSkills] audio.play() rejected:", playErr);
-              setVoiceError("Audio playback was blocked by the browser. Open the app in a new tab and allow sound.");
-            }
-            finish();
-          }
+          if (generation !== speechGenerationRef.current) return;
+          if (!ok) throw new Error("audio playback unavailable");
         } catch (err: any) {
           if (err?.name !== "AbortError" && generation === speechGenerationRef.current) {
             console.warn("[CommSkills] Server TTS failed:", err?.message || err);
             setVoiceError("AI voice is temporarily unavailable. The text reply is still available.");
           }
-          finish();
         } finally {
           if (ttsAbortRef.current === ctrl) ttsAbortRef.current = null;
+          finish();
         }
       };
       run().catch(() => finish());

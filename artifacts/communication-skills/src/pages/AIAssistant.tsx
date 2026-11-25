@@ -7,7 +7,8 @@ import {
 import { ChatMessage } from "@/components/chat/ChatMessage";
 import { useChatStream } from "@/hooks/use-chat-stream";
 import { createLiveSpeechRecognition } from "@/lib/speechRecognition";
-import { speakWithAccent } from "@/lib/speechSynthesis";
+import { speakWithAccent, stopBrowserSpeech } from "@/lib/speechSynthesis";
+import { speakViaServer, stopServerSpeech } from "@/lib/serverTts";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 
@@ -131,6 +132,8 @@ export default function AIAssistant() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lastSpokenIdRef = useRef<string>("");
+  const speechAbortRef = useRef<AbortController | null>(null);
+  const speechGenerationRef = useRef(0);
 
   const [isRecording, setIsRecording] = useState(false);
   const recognitionRef = useRef<any>(null);
@@ -153,6 +156,59 @@ export default function AIAssistant() {
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
+  const stopCurrentSpeech = useCallback(() => {
+    speechGenerationRef.current += 1;
+    speechAbortRef.current?.abort();
+    speechAbortRef.current = null;
+    stopBrowserSpeech();
+    stopServerSpeech();
+  }, []);
+
+  const speakText = useCallback(async (text: string): Promise<boolean> => {
+    stopCurrentSpeech();
+    const generation = speechGenerationRef.current;
+    const clearState = () => {
+      if (generation === speechGenerationRef.current) {
+        setIsSpeaking(false);
+        setSpeakingText("");
+      }
+    };
+    setSpeakingText(text);
+
+    const browser = await speakWithAccent(text, {
+      lang: "en-IN",
+      onStart: () => { if (generation === speechGenerationRef.current) setIsSpeaking(true); },
+      onEnd: clearState,
+      onError: () => {},
+    });
+    if (generation !== speechGenerationRef.current) return false;
+    // Only skip the fallback when the browser actually began speaking.
+    if (browser.started) return true;
+
+    const controller = new AbortController();
+    speechAbortRef.current = controller;
+    const ok = await speakViaServer(text, {
+      voice: "en_US",
+      signal: controller.signal,
+      onStart: () => { if (generation === speechGenerationRef.current) setIsSpeaking(true); },
+      onEnd: clearState,
+      onError: () => {},
+    });
+    if (speechAbortRef.current === controller) speechAbortRef.current = null;
+    if (!ok) clearState();
+    return ok;
+  }, [stopCurrentSpeech]);
+
+  const handleReadAloud = useCallback((text: string) => {
+    if (isSpeaking && speakingText === text) {
+      stopCurrentSpeech();
+      setIsSpeaking(false);
+      setSpeakingText("");
+      return;
+    }
+    void speakText(text);
+  }, [isSpeaking, speakingText, speakText, stopCurrentSpeech]);
+
   useEffect(() => {
     if (isMuted || isGenerating) return;
     const lastMsg = messages[messages.length - 1];
@@ -163,44 +219,27 @@ export default function AIAssistant() {
       lastMsg.id !== "welcome" &&
       lastMsg.id !== lastSpokenIdRef.current
     ) {
-      lastSpokenIdRef.current = lastMsg.id;
-      speakText(lastMsg.text);
+      const id = lastMsg.id;
+      void speakText(lastMsg.text).then((ok) => {
+        // Only mark as spoken once audio really started, so a blocked browser
+        // voice can still be retried via server audio on the next update.
+        if (ok) lastSpokenIdRef.current = id;
+      });
     }
-  }, [messages, isGenerating, isMuted]);
-
-  const speakText = useCallback((text: string) => {
-    window.speechSynthesis.cancel();
-    setSpeakingText(text);
-    speakWithAccent(text, {
-      lang: "en-IN",
-      onStart: () => setIsSpeaking(true),
-      onEnd: () => { setIsSpeaking(false); setSpeakingText(""); },
-      onError: () => { setIsSpeaking(false); setSpeakingText(""); },
-    });
-  }, []);
-
-  const handleReadAloud = useCallback((text: string) => {
-    if (isSpeaking && speakingText === text) {
-      window.speechSynthesis.cancel();
-      setIsSpeaking(false);
-      setSpeakingText("");
-      return;
-    }
-    speakText(text);
-  }, [isSpeaking, speakingText, speakText]);
+  }, [messages, isGenerating, isMuted, speakText]);
 
 const handleSend = useCallback((text: string = input) => {
     const trimmed = text.trim();
     if (!trimmed || isGenerating) return;
-    window.speechSynthesis.cancel();
+    stopCurrentSpeech();
     sendMessage(trimmed);
     setInput("");
     if (textareaRef.current) textareaRef.current.style.height = "auto";
-  }, [input, isGenerating, sendMessage]);
+  }, [input, isGenerating, sendMessage, stopCurrentSpeech]);
 
   const startRecording = useCallback(() => {
     if (isGenerating) return;
-    window.speechSynthesis.cancel();
+    stopCurrentSpeech();
 
     const recognition = createLiveSpeechRecognition("en-US");
     recognition.lang = "en-US";
@@ -250,7 +289,7 @@ const handleSend = useCallback((text: string = input) => {
     } catch {
       setIsRecording(false);
     }
-  }, [handleSend, isGenerating]);
+  }, [handleSend, isGenerating, stopCurrentSpeech]);
 
   const stopRecording = useCallback(() => {
     shouldSendRef.current = shouldSendRef.current || voiceModeRef.current;
@@ -264,10 +303,12 @@ const handleSend = useCallback((text: string = input) => {
   }, [isRecording, startRecording, stopRecording]);
 
   const toggleMute = useCallback(() => {
-    window.speechSynthesis.cancel();
+    stopCurrentSpeech();
     setIsSpeaking(false);
+    setSpeakingText("");
+    if (isMuted) lastSpokenIdRef.current = "";
     setIsMuted(prev => !prev);
-  }, []);
+  }, [isMuted, stopCurrentSpeech]);
 
   const toggleVoiceMode = useCallback(() => {
     const next = !voiceMode;
@@ -360,7 +401,7 @@ const handleSend = useCallback((text: string = input) => {
 
           {/* Clear chat */}
           <button
-            onClick={() => { clearChat(); window.speechSynthesis.cancel(); }}
+            onClick={() => { clearChat(); stopCurrentSpeech(); lastSpokenIdRef.current = ""; }}
             title="Clear conversation"
             className="p-2 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
           >

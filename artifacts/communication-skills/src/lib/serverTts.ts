@@ -8,8 +8,16 @@ import { apiUrl } from "@workspace/api-client-react";
 
 type ServerVoice = "en_US" | "hi_IN" | "en_IN";
 
+/** Edge-TTS strings: e.g. rate "-3%", pitch "+2Hz", volume "+0%". */
+export interface SpeechStyle {
+  rate?: string;
+  pitch?: string;
+  volume?: string;
+}
+
 export interface ServerSpeechOptions {
   voice?: ServerVoice;
+  style?: SpeechStyle;
   signal?: AbortSignal;
   onStart?: () => void;
   onEnd?: () => void;
@@ -83,7 +91,11 @@ export function speakViaServer(text: string, options: ServerSpeechOptions = {}):
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
-          body: JSON.stringify({ text, voice: options.voice ?? "en_US" }),
+          body: JSON.stringify({
+            text,
+            voice: options.voice ?? "en_US",
+            style: options.style,
+          }),
           signal: options.signal,
         });
         if (!response.ok || options.signal?.aborted) {

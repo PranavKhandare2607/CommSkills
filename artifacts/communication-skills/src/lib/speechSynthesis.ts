@@ -9,7 +9,7 @@
  */
 
 const FEMALE_VOICE_HINT =
-  /female|woman|girl|heera|raveena|kalpana|priya|veena|aditi|leela|shelley|samantha|zira|susan|karen|tessa|fiona|moira|catherine|allison|ava|serena|victoria|neerja/i;
+  /female|woman|girl|heera|raveena|kalpana|priya|veena|aditi|leela|shelley|samantha|zira|susan|karen|tessa|fiona|moira|catherine|allison|ava|serena|victoria|neerja|swara|ananya|diya|meera|sneha/i;
 
 export function isBrowserSpeechSupported(): boolean {
   return (
@@ -41,8 +41,13 @@ export function waitForVoices(timeoutMs = 900): Promise<void> {
   });
 }
 
-/** Pick the most natural Indian voice for the requested language. */
-export function pickAccentedVoice(lang: string): SpeechSynthesisVoice | undefined {
+/**
+ * Pick the most natural Indian voice for the requested language.
+ * When `requireIndian` is true, a generic en-US/en-GB voice is deliberately
+ * skipped so the caller can use the server's Indian neural voice instead of
+ * speaking with the wrong accent.
+ */
+export function pickAccentedVoice(lang: string, requireIndian = false): SpeechSynthesisVoice | undefined {
   const voices = getSpeechVoices();
   if (voices.length === 0) return undefined;
 
@@ -54,7 +59,8 @@ export function pickAccentedVoice(lang: string): SpeechSynthesisVoice | undefine
       matches("hi").find((voice) => FEMALE_VOICE_HINT.test(voice.name)) ||
       matches("hi")[0] ||
       matches("en-in").find((voice) => FEMALE_VOICE_HINT.test(voice.name)) ||
-      matches("en-in")[0]
+      matches("en-in")[0] ||
+      (requireIndian ? undefined : matches("en")[0])
     );
   }
 
@@ -62,8 +68,9 @@ export function pickAccentedVoice(lang: string): SpeechSynthesisVoice | undefine
   return (
     matches("en-in").find((voice) => FEMALE_VOICE_HINT.test(voice.name)) ||
     matches("en-in")[0] ||
-    matches("en").find((voice) => FEMALE_VOICE_HINT.test(voice.name)) ||
-    matches("en")[0]
+    (requireIndian
+      ? undefined
+      : matches("en").find((voice) => FEMALE_VOICE_HINT.test(voice.name)) || matches("en")[0])
   );
 }
 
@@ -83,6 +90,11 @@ export interface SpeakOptions {
   lang?: string;
   rate?: number;
   pitch?: number;
+  volume?: number;
+  /** Reject generic non-Indian browser voices so a caller can use server audio. */
+  requireIndianVoice?: boolean;
+  /** How long to wait for the browser to confirm playback before failing over. */
+  startTimeoutMs?: number;
   onStart?: () => void;
   onEnd?: () => void;
   onError?: () => void;
@@ -119,7 +131,7 @@ export async function speakWithAccent(text: string, options: SpeakOptions = {}):
   }
 
   await waitForVoices();
-  const voice = pickAccentedVoice(options.lang ?? "en-IN");
+  const voice = pickAccentedVoice(options.lang ?? "en-IN", options.requireIndianVoice);
   if (!voice) {
     options.onError?.();
     return empty;
@@ -137,7 +149,7 @@ export async function speakWithAccent(text: string, options: SpeakOptions = {}):
   utterance.lang = voice.lang || options.lang || "en-IN";
   utterance.rate = options.rate ?? 0.95;
   utterance.pitch = options.pitch ?? 1.05;
-  utterance.volume = 1;
+  utterance.volume = options.volume ?? 1;
 
   let settled = false;
   const markStarted = () => {
@@ -184,7 +196,7 @@ export async function speakWithAccent(text: string, options: SpeakOptions = {}):
       stopBrowserSpeech();
       options.onError?.();
     }
-  }, 1500);
+  }, options.startTimeoutMs ?? 1500);
   void startedPromise.then(() => clearTimeout(guard));
 
   return {

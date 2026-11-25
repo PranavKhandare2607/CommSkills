@@ -195,9 +195,19 @@ function prepareCompanionSpeech(text: string): string {
     .replace(/^\s*[-*+]\s+/gm, "")
     .replace(/(\*\*|__)(.*?)\1/g, "$2")
     .replace(/[*_`]/g, "")
+    // Emojis are written for the eye, not the ear; some voices read them out.
+    .replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, "")
     .replace(/\n{2,}/g, ". ")
     .replace(/[ \t]*\n[ \t]*/g, ". ")
     .trim();
+}
+
+/** Convert a browser pitch/rate multiplier to the strings Edge-TTS expects. */
+function expressiveStyle(rate: number, pitch: number): { rate: string; pitch: string } {
+  const ratePercent = Math.round((rate - 1) * 100);
+  const pitchHz = Math.round((pitch - 1) * 20);
+  const signed = (value: number, unit: string) => `${value >= 0 ? "+" : ""}${value}${unit}`;
+  return { rate: signed(ratePercent, "%"), pitch: signed(pitchHz, "Hz") };
 }
 
 function normalizedSpeechText(text: string): string {
@@ -491,54 +501,107 @@ export default function Companion() {
           : lang === "hinglish"
             ? "Indian English (Hinglish)"
             : "Indian English";
-        setActiveVoiceName(`${label} voice`);
 
-        // 1. Try the browser's Indian voice first. `started` is true only when
-        //    real audio began — a missing/blocked voice falls through below.
+        // Priya sounds lively; Aisha stays calm and encouraging. Punctuation
+        // adds a little feeling without changing the spoken words.
+        let rate = mode === "friend" ? 1.02 : 0.96;
+        let pitch = mode === "friend" ? 1.12 : 1.05;
+        const finalChar = clean.trimEnd().slice(-1);
+        if (finalChar === "!") { rate += 0.03; pitch += 0.06; }
+        else if (finalChar === "?") { pitch += 0.04; }
+        else if (/(\.\.\.|…)\s*$/.test(clean)) { rate -= 0.04; }
+        rate = Math.min(1.1, Math.max(0.88, rate));
+        pitch = Math.min(1.25, Math.max(0.95, pitch));
+        const style = expressiveStyle(rate, pitch);
+
         let safetyTimer: ReturnType<typeof setTimeout> | null = null;
+        const clearSafetyTimer = () => {
+          if (safetyTimer) clearTimeout(safetyTimer);
+          safetyTimer = null;
+        };
+        const keepQueueAlive = () => {
+          // Some browsers skip `onend` for long utterances; keep the queue moving.
+          safetyTimer = setTimeout(finish, Math.max(10000, clean.length * 110));
+        };
+        const onStart = () => setIsSpeaking(true);
+        const onEnd = () => { clearSafetyTimer(); finish(); };
+
+        // 1. Prefer a real Indian browser voice. Generic en-US/en-GB voices are
+        //    rejected below so the accent never quietly changes.
+        setActiveVoiceName(`${label} voice`);
         const attempt = await speakWithAccent(clean, {
           lang: speechLang,
-          rate: 0.96,
-          pitch: 1.05,
-          onStart: () => setIsSpeaking(true),
-          onEnd: () => { if (safetyTimer) clearTimeout(safetyTimer); finish(); },
+          rate,
+          pitch,
+          requireIndianVoice: true,
+          startTimeoutMs: 800,
+          onStart,
+          onEnd,
           onError: () => {},
         });
         activeUtteranceRef.current = attempt.utterance;
         if (generation !== speechGenerationRef.current) return;
         if (attempt.started) {
-          // Some browsers skip `onend` for long utterances; keep the queue moving.
-          safetyTimer = setTimeout(finish, Math.max(10000, clean.length * 110));
+          keepQueueAlive();
           return;
         }
 
-        // 2. Server audio fallback. Uses /api/tts/speak (login only) so it also
-        //    works when the Premium-gated companion endpoint is unavailable.
+        // 2. Server audio: neural Indian voice with expressive rate/pitch.
+        //    Uses /api/tts/speak (login only) so it works even if the
+        //    Premium-gated companion endpoint is unavailable.
         const ctrl = new AbortController();
         ttsAbortRef.current = ctrl;
-        setActiveVoiceName(lang === "hindi" ? "Indian Hindi voice" : lang === "hinglish" ? "Indian Hinglish voice" : "Indian English voice");
+        setActiveVoiceName(`${label} voice · expressive`);
+        let serverStarted = false;
+        let serverError: any = null;
         try {
-          const attempt = await speakViaServer(clean, {
+          const serverAttempt = await speakViaServer(clean, {
             voice: lang === "hindi" ? "hi_IN" : "en_IN",
+            style,
             signal: ctrl.signal,
-            onStart: () => setIsSpeaking(true),
-            onEnd: () => { if (generation === speechGenerationRef.current) finish(); },
+            onStart,
+            onEnd,
             onError: () => {},
           });
           if (generation !== speechGenerationRef.current) return;
-          if (!attempt.started) throw new Error("audio playback unavailable");
+          if (!serverAttempt.started) throw new Error("audio playback unavailable");
+          serverStarted = true;
           // Wait for the audio to actually finish so the speaking animation
           // stays alive for the whole reply instead of stopping at play().
-          await attempt.waitForEnd();
+          await serverAttempt.waitForEnd();
         } catch (err: any) {
-          if (err?.name !== "AbortError" && generation === speechGenerationRef.current) {
-            console.warn("[CommSkills] Server TTS failed:", err?.message || err);
-            setVoiceError("AI voice is temporarily unavailable. The text reply is still available.");
-          }
+          serverError = err;
         } finally {
           if (ttsAbortRef.current === ctrl) ttsAbortRef.current = null;
-          finish();
         }
+        if (generation !== speechGenerationRef.current) return;
+        if (serverStarted) {
+          finish();
+          return;
+        }
+
+        // 3. Last resort when the TTS service is down: use any device voice.
+        //    Accent quality is lower, but silence is worse than a fallback.
+        setActiveVoiceName("Device voice (Indian voice unavailable)");
+        const generic = await speakWithAccent(clean, {
+          lang: speechLang,
+          rate,
+          pitch,
+          onStart,
+          onEnd,
+          onError: () => {},
+        });
+        activeUtteranceRef.current = generic.utterance;
+        if (generation !== speechGenerationRef.current) return;
+        if (generic.started) {
+          keepQueueAlive();
+          return;
+        }
+        if (serverError?.name !== "AbortError") {
+          console.warn("[CommSkills] Server TTS failed:", serverError?.message || serverError);
+          setVoiceError("AI voice is temporarily unavailable. The text reply is still available.");
+        }
+        finish();
       };
       run().catch(() => finish());
     });

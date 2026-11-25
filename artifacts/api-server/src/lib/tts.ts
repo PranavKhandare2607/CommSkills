@@ -7,11 +7,35 @@ export interface SynthesizedSpeech {
   contentType: string;
 }
 
-export async function synthesizeSpeech(text: string, voice: TtsVoice): Promise<SynthesizedSpeech> {
+/** Edge-TTS prosody strings, e.g. rate "-3%", pitch "+2Hz", volume "+0%". */
+export interface TtsStyle {
+  rate?: string;
+  pitch?: string;
+  volume?: string;
+}
+
+const PERCENT_PATTERN = /^[+-]\d{1,3}%$/;
+const PITCH_PATTERN = /^[+-]\d{1,3}Hz$/;
+
+// Only forward known-safe Edge-TTS values; ignore anything else from a client.
+function sanitizeStyle(style?: TtsStyle): TtsStyle | undefined {
+  if (!style || typeof style !== "object") return undefined;
+  const clean: TtsStyle = {};
+  if (typeof style.rate === "string" && PERCENT_PATTERN.test(style.rate)) clean.rate = style.rate;
+  if (typeof style.pitch === "string" && PITCH_PATTERN.test(style.pitch)) clean.pitch = style.pitch;
+  if (typeof style.volume === "string" && PERCENT_PATTERN.test(style.volume)) clean.volume = style.volume;
+  return Object.keys(clean).length > 0 ? clean : undefined;
+}
+
+export async function synthesizeSpeech(
+  text: string,
+  voice: TtsVoice,
+  style?: TtsStyle,
+): Promise<SynthesizedSpeech> {
   const response = await fetch(`${TTS_BASE_URL}/speak`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, voice }),
+    body: JSON.stringify({ text, voice, style: sanitizeStyle(style) }),
   });
 
   if (!response.ok) {

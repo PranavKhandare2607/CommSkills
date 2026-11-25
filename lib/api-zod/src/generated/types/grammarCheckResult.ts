@@ -12,4 +12,8 @@ export interface GrammarCheckResult {
   score: number;
   improvements: string[];
   explanation: string;
+  /** Unique capital letters used in the corrected text, in order of appearance */
+  capitalLetters: string[];
+  /** Unique punctuation marks used in the corrected text, in order of appearance */
+  punctuation: string[];
 }

@@ -115,6 +115,16 @@ export const CheckGrammarResponse = zod.object({
   score: zod.number(),
   improvements: zod.array(zod.string()),
   explanation: zod.string(),
+  capitalLetters: zod
+    .array(zod.string())
+    .describe(
+      "Unique capital letters used in the corrected text, in order of appearance",
+    ),
+  punctuation: zod
+    .array(zod.string())
+    .describe(
+      "Unique punctuation marks used in the corrected text, in order of appearance",
+    ),
 });
 
 /**

@@ -130,6 +130,24 @@ function editDistance(a: string, b: string): number {
   return previous[right.length];
 }
 
+/** Unique capital letters in order of appearance, e.g. ["I", "H"]. */
+function usedCapitalLetters(text: string): string[] {
+  const seen = new Set<string>();
+  for (const char of text) {
+    if (/[A-Z]/.test(char) && !seen.has(char)) seen.add(char);
+  }
+  return [...seen];
+}
+
+/** Unique punctuation marks in order of appearance, e.g. [".", ",", "'"]. */
+function usedPunctuation(text: string): string[] {
+  const seen = new Set<string>();
+  for (const char of text) {
+    if (/[.,!?;:'"()\[\]{}\-—–]/.test(char) && !seen.has(char)) seen.add(char);
+  }
+  return [...seen];
+}
+
 /**
  * Conservative post-corrections for patterns the small local model often
  * leaves behind. Each rule is narrow enough that it should not alter text
@@ -224,6 +242,8 @@ Fix subject-verb agreement, tense agreement, articles, double negatives, and spe
       score,
       improvements,
       explanation,
+      capitalLetters: usedCapitalLetters(corrected),
+      punctuation: usedPunctuation(corrected),
     });
   } catch (err) {
     res.status(500).json({ error: "Grammar check failed" });

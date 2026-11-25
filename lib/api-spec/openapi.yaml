@@ -454,12 +454,24 @@ components:
             type: string
         explanation:
           type: string
+        capitalLetters:
+          type: array
+          items:
+            type: string
+          description: Unique capital letters used in the corrected text, in order of appearance
+        punctuation:
+          type: array
+          items:
+            type: string
+          description: Unique punctuation marks used in the corrected text, in order of appearance
       required:
         - original
         - corrected
         - score
         - improvements
         - explanation
+        - capitalLetters
+        - punctuation
 
     VocabularyLookupBody:
       type: object

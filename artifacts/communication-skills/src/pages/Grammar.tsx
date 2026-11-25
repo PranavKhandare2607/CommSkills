@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { motion } from "framer-motion";
-import { CheckSquare, ArrowRight, Lightbulb, CheckCircle2 } from "lucide-react";
+import { CheckSquare, ArrowRight, Lightbulb, CheckCircle2, Type, Quote } from "lucide-react";
 import { useCheckGrammar, useUpdateProgress } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getGetProgressQueryKey } from "@workspace/api-client-react";
@@ -130,6 +130,56 @@ export default function Grammar() {
                   ))}
                 </ul>
               )}
+            </div>
+
+            <div className="md:col-span-3 bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+              <h3 className="text-lg font-display font-bold text-slate-900 mb-4 flex items-center gap-2">
+                <Type className="w-5 h-5 text-emerald-600" />
+                Capital Letters & Punctuation
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
+                  <h4 className="text-sm font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-2 mb-3">
+                    <Type className="w-4 h-4 text-slate-400" />
+                    Capital letters used
+                  </h4>
+                  <div className="flex flex-wrap gap-2">
+                    {Array.isArray(result.capitalLetters) && result.capitalLetters.length > 0 ? (
+                      result.capitalLetters.map((letter, i) => (
+                        <span
+                          key={`${letter}-${i}`}
+                          className="min-w-[2.5rem] text-center px-3 py-1.5 rounded-lg bg-white border border-slate-200 font-mono text-lg font-semibold text-slate-700 shadow-sm"
+                        >
+                          {letter}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-sm text-slate-400">None used</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
+                  <h4 className="text-sm font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-2 mb-3">
+                    <Quote className="w-4 h-4 text-slate-400" />
+                    Punctuation used
+                  </h4>
+                  <div className="flex flex-wrap gap-2">
+                    {Array.isArray(result.punctuation) && result.punctuation.length > 0 ? (
+                      result.punctuation.map((symbol, i) => (
+                        <span
+                          key={`${symbol}-${i}`}
+                          className="min-w-[2.5rem] text-center px-3 py-1.5 rounded-lg bg-white border border-slate-200 font-mono text-lg font-semibold text-slate-700 shadow-sm"
+                        >
+                          {symbol}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-sm text-slate-400">None used</span>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
           </motion.div>
         )}

@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { apiUrl } from "@workspace/api-client-react";
+import { apiFetch } from "@workspace/api-client-react";
 
 type RecorderState = "idle" | "recording" | "processing" | "error";
 
@@ -72,10 +72,9 @@ export function useLocalRecorder({
       formData.append("file", blob, "recording.webm");
       formData.append("language", language);
 
-      const res = await fetch(apiUrl("/api/stt/transcribe"), {
+      const res = await apiFetch("/api/stt/transcribe", {
         method: "POST",
         body: formData,
-        credentials: "include",
       });
 
       if (!res.ok) {

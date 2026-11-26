@@ -38,6 +38,14 @@ export function apiUrl(path: string): string {
   return `${_baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
+/** Fetch an API path with the configured base URL and credentials. */
+export function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  return fetch(apiUrl(path), {
+    credentials: "include",
+    ...init,
+  });
+}
+
 /**
  * Register a getter that supplies a bearer auth token.  Before every fetch
  * the getter is invoked; when it returns a non-null string, an

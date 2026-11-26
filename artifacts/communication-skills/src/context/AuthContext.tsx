@@ -6,7 +6,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { apiUrl, getBaseUrl } from "@workspace/api-client-react";
+import { apiFetch, getBaseUrl } from "@workspace/api-client-react";
 
 interface User {
   id: string;
@@ -50,7 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    fetch(apiUrl("/api/auth/me"), { credentials: "include" })
+    apiFetch("/api/auth/me")
       .then((res) => (res.ok ? readJson(res) : null))
       .then((data) => {
         if (data?.user) setUser(data.user);
@@ -60,10 +60,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signIn = useCallback(async (email: string, password: string) => {
-    const res = await fetch(apiUrl("/api/auth/login"), {
+    const res = await apiFetch("/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      credentials: "include",
       body: JSON.stringify({ email, password }),
     });
     const data = await readJson(res);
@@ -74,10 +73,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signUp = useCallback(async (email: string, password: string) => {
-    const res = await fetch(apiUrl("/api/auth/register"), {
+    const res = await apiFetch("/api/auth/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      credentials: "include",
       body: JSON.stringify({ email, password }),
     });
     const data = await readJson(res);
@@ -88,9 +86,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
-    await fetch(apiUrl("/api/auth/logout"), {
+    await apiFetch("/api/auth/logout", {
       method: "POST",
-      credentials: "include",
     });
     setUser(null);
   }, []);

@@ -11,7 +11,7 @@ import { createLiveSpeechRecognition } from "@/lib/speechRecognition";
 import { speakWithAccent, stopBrowserSpeech } from "@/lib/speechSynthesis";
 import { speakViaServer, stopServerSpeech } from "@/lib/serverTts";
 import {
-  apiUrl,
+  apiFetch,
   useScoreCompanionAnswer,
   useUpdateProgress,
   type CompanionAnswerScore,
@@ -964,10 +964,9 @@ export default function Companion() {
         .filter(m => m.id !== "welcome" && m.content.trim() && !m.content.trim().startsWith("⚠️"))
         .slice(-12)
         .map(m => ({ role: m.role, content: m.content }));
-      const res = await fetch(apiUrl("/api/companion/respond"), {
+      const res = await apiFetch("/api/companion/respond", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include",
         body: JSON.stringify({
           mode,
           history,
@@ -1198,10 +1197,9 @@ export default function Companion() {
     try {
       const sessionDuration = Math.round((Date.now() - sessionStartTime.current) / 1000);
       const userMsgCount = messages.filter(m => m.role === "user").length;
-      const res = await fetch(apiUrl("/api/companion/feedback"), {
+      const res = await apiFetch("/api/companion/feedback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include",
         body: JSON.stringify({
           mode,
           transcript: messages.map(m => ({ role: m.role, content: m.content })),

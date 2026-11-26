@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
+import { getBaseUrl } from "@workspace/api-client-react";
 
 import { AppLayout } from "@/components/layout/AppLayout";
 import Landing from "@/pages/Landing";
@@ -22,6 +23,7 @@ import Companion from "@/pages/Companion";
 import Resources from "@/pages/Resources";
 import Games from "@/pages/Games";
 import NotFound from "@/pages/not-found";
+import LocalOnly from "@/pages/LocalOnly";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -91,7 +93,23 @@ function AppRoutes() {
   );
 }
 
+function isLocalOnlyPreview(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    window.location.hostname.endsWith("github.io") &&
+    !getBaseUrl()
+  );
+}
+
 function App() {
+  if (isLocalOnlyPreview()) {
+    return (
+      <TooltipProvider>
+        <LocalOnly />
+      </TooltipProvider>
+    );
+  }
+
   return (
     <TooltipProvider>
       <WouterRouter base={basePath}>

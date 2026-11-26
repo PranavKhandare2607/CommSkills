@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { apiUrl } from "@workspace/api-client-react";
+import { apiFetch } from "@workspace/api-client-react";
 
 export interface SubscriptionData {
   plan: string;
@@ -27,7 +27,7 @@ export function useSubscription() {
   return useQuery<SubscriptionData>({
     queryKey: ["subscription"],
     queryFn: async () => {
-      const res = await fetch(apiUrl("/api/subscription"), { credentials: "include" });
+      const res = await apiFetch("/api/subscription");
       if (res.status === 401) return null as unknown as SubscriptionData;
       if (!res.ok) throw new Error("Failed to fetch subscription");
       return res.json();

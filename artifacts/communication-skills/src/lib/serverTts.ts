@@ -1,4 +1,4 @@
-import { apiUrl } from "@workspace/api-client-react";
+import { apiFetch } from "@workspace/api-client-react";
 
 /**
  * Server-generated speech fallback. Used when the browser has no usable
@@ -87,10 +87,9 @@ export function speakViaServer(text: string, options: ServerSpeechOptions = {}):
 
     void (async () => {
       try {
-        const response = await fetch(apiUrl("/api/tts/speak"), {
+        const response = await apiFetch("/api/tts/speak", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          credentials: "include",
           body: JSON.stringify({
             text,
             voice: options.voice ?? "en_US",
